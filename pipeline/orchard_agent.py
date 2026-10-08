@@ -55,6 +55,7 @@ class AdvisorResponse:
     reasoning: str = ""
     tool_calls: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
+    grounding: str = "red"  # "green" | "red" -- see assess_grounding()
 
 
 def _strip_think(text: str) -> tuple[str, str]:
@@ -100,6 +101,25 @@ def _dedup(items: list[str]) -> list[str]:
             seen.add(it)
             out.append(it)
     return out
+
+
+def assess_grounding(answer: str, sources: list[str], tool_calls: list[str]) -> str:
+    """Returns "green" or "red" -- a HEURISTIC indicator of whether `answer` appears to
+    actually use the sources/tool results that were available, rather than ignoring them and
+    asserting something freely (design doc Deel F #12 -- this is NOT a factual-correctness
+    check, only a "did it cite what it had" check). "green" requires BOTH (a) at least one
+    source or tool call was available this turn, AND (b) the answer text itself references a
+    citation (contains "bron(nen):" or literally names one of the tools that were called) --
+    a response that HAD sources available but never mentions them in its own text still comes
+    back "red" (the model may simply have ignored its own context)."""
+    if not sources and not tool_calls:
+        return "red"
+    text_lower = answer.lower()
+    if "bronnen:" in text_lower or "bron:" in text_lower:
+        return "green"
+    if any(tc.lower() in text_lower for tc in tool_calls):
+        return "green"
+    return "red"
 
 
 def ask_orchard_advisor(
@@ -151,11 +171,14 @@ def ask_orchard_advisor(
 
         tool_call = _extract_tool_call(remainder) if _hop < max_tool_hops else None
         if tool_call is None:
+            final_answer = remainder or "(geen antwoord ontvangen -- het model had meer tokens nodig dan beschikbaar)"
+            deduped_sources = _dedup(sources)
             return AdvisorResponse(
-                answer=remainder or "(geen antwoord ontvangen -- het model had meer tokens nodig dan beschikbaar)",
+                answer=final_answer,
                 reasoning="\n\n".join(reasoning_parts),
                 tool_calls=tool_calls_made,
-                sources=_dedup(sources),
+                sources=deduped_sources,
+                grounding=assess_grounding(final_answer, deduped_sources, tool_calls_made),
             )
 
         name = tool_call.get("call_tool")
@@ -177,9 +200,12 @@ def ask_orchard_advisor(
     reasoning, remainder = _strip_think(raw)
     if reasoning:
         reasoning_parts.append(reasoning)
+    final_answer = remainder or "(geen antwoord ontvangen)"
+    deduped_sources = _dedup(sources)
     return AdvisorResponse(
-        answer=remainder or "(geen antwoord ontvangen)",
+        answer=final_answer,
         reasoning="\n\n".join(reasoning_parts),
         tool_calls=tool_calls_made,
-        sources=_dedup(sources),
+        sources=deduped_sources,
+        grounding=assess_grounding(final_answer, deduped_sources, tool_calls_made),
     )

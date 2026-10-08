@@ -3,7 +3,7 @@ Qwen3-8B call in the automated suite; end-to-end ReACT behaviour is smoke-tested
 against the real cloud inference server, see pipeline/orchard_agent.py's own docstring)."""
 from __future__ import annotations
 
-from pipeline.orchard_agent import _dedup, _extract_tool_call, _strip_think
+from pipeline.orchard_agent import _dedup, _extract_tool_call, _strip_think, assess_grounding
 
 
 def test_strip_think_extracts_reasoning_block():
@@ -54,3 +54,30 @@ def test_extract_tool_call_returns_none_for_json_without_call_tool_key():
 
 def test_dedup_preserves_first_occurrence_order():
     assert _dedup(["a", "b", "a", "c", "b"]) == ["a", "b", "c"]
+
+
+# ── assess_grounding ───────────────────────────────────────────────────────────────────────
+def test_assess_grounding_red_when_no_sources_or_tools():
+    assert assess_grounding("Dat weet ik niet zeker.", [], []) == "red"
+
+
+def test_assess_grounding_green_when_answer_cites_bronnen():
+    answer = "Koude-uren zijn op schema.\n\nBronnen: WUR-publicatie X"
+    assert assess_grounding(answer, ["WUR-publicatie X"], []) == "green"
+
+
+def test_assess_grounding_green_when_answer_names_a_used_tool():
+    answer = "Op basis van koude_uren is er geen risico."
+    assert assess_grounding(answer, [], ["koude_uren"]) == "green"
+
+
+def test_assess_grounding_red_when_sources_available_but_not_cited_in_text():
+    # Regression guard: having sources available is NOT enough -- the answer text itself must
+    # reference them, otherwise the model may have ignored its own context.
+    answer = "Ik denk dat het wel goed komt."
+    assert assess_grounding(answer, ["WUR-publicatie X"], []) == "red"
+
+
+def test_assess_grounding_case_insensitive_bron_match():
+    answer = "Zie BRON: iets"
+    assert assess_grounding(answer, ["iets"], []) == "green"

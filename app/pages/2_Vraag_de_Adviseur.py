@@ -10,8 +10,12 @@ Track 1-kennisbank-zoekopdracht vooraf (dense retrieval + cross-encoder rerankin
 tools (weer, koude-uren, vorst, suzuki, vruchtbarsten, Ctgb-guardrail) zelf mag aanroepen
 (`pipeline/orchard_tool_catalog.py`), en (3) Qwen3's eigen `<think>`-redenering zichtbaar
 gemaakt in een inklapbare "Redenering (CoT)"-sectie. Dit is nog het ONGETRAINDE basismodel
-(geen SFT/DPO) -- elk antwoord krijgt daarom nog een expliciete waarschuwing. Zie ontwerp
-Deel E voor de trainingsroadmap.
+(geen SFT/DPO) -- elk antwoord krijgt daarom nog een expliciete waarschuwing. Elk antwoord
+krijgt ook een rood/groen hallucinatie-indicator (`pipeline.orchard_agent.assess_grounding()` --
+een HEURISTIEK, zie design doc Deel F #12, geen garantie) en duim-omhoog/omlaag-knoppen die
+een voorkeurssignaal opslaan voor een toekomstige DPO-trainingsronde
+(`pipeline/orchard_feedback.py`, zie Deel E stap 7/Deel F #11). Zie ontwerp Deel E voor de
+trainingsroadmap.
 """
 from __future__ import annotations
 
@@ -24,6 +28,7 @@ from orchard_common import compute_season_snapshot, render_sidebar  # noqa: E402
 import streamlit as st
 
 from pipeline.orchard_agent import ask_orchard_advisor  # noqa: E402
+from pipeline.orchard_feedback import build_feedback_record, save_feedback  # noqa: E402
 from pipeline.orchard_rag import load_index  # noqa: E402
 from pipeline.orchard_tools import check_ctgb_toelating, get_rain_nowcast  # noqa: E402
 from pipeline.qwen_remote import is_remote_server_up, reconnect_tunnel  # noqa: E402
@@ -63,7 +68,7 @@ def _ask_advisor(question: str, snapshot: dict | None) -> dict:
     except (ConnectionError, RuntimeError) as exc:
         return {
             "answer": f"Kon het Qwen3-8B-model niet bereiken: {exc}",
-            "reasoning": "", "tool_calls": [], "sources": [],
+            "reasoning": "", "tool_calls": [], "sources": [], "grounding": "red",
         }
     answer = resp.answer
     if resp.sources and "Bronnen:" not in answer:
@@ -73,7 +78,10 @@ def _ask_advisor(question: str, snapshot: dict | None) -> dict:
         "(wel met kennisbank/RAG, nog geen SFT/DPO-training) -- controleer specifieke "
         "feiten altijd tegen de genoemde bron.*"
     )
-    return {"answer": answer, "reasoning": resp.reasoning, "tool_calls": resp.tool_calls, "sources": resp.sources}
+    return {
+        "answer": answer, "reasoning": resp.reasoning, "tool_calls": resp.tool_calls,
+        "sources": resp.sources, "grounding": resp.grounding,
+    }
 
 
 def _route_question(question: str) -> dict:
@@ -86,11 +94,11 @@ def _route_question(question: str) -> dict:
     else:
         snap_error = None
 
-    def _plain(text: str) -> dict:
-        return {"answer": text, "reasoning": "", "tool_calls": [], "sources": []}
+    def _plain(text: str, grounding: str = "green") -> dict:
+        return {"answer": text, "reasoning": "", "tool_calls": [], "sources": [], "grounding": grounding}
 
     if snap is None:
-        return _plain(snap_error)
+        return _plain(snap_error, grounding="red")
 
     if any(k in q for k in ("middel", "dosering", "toegelaten", "ctgb", "spuiten met")):
         try:
@@ -120,7 +128,7 @@ def _route_question(question: str) -> dict:
                 )
             return _plain(f"Geen neerslag verwacht in de komende 2 uur (bron: {nowcast.source_citation}).")
         except Exception as exc:
-            return _plain(f"Buienradar-nowcast niet beschikbaar: {exc}")
+            return _plain(f"Buienradar-nowcast niet beschikbaar: {exc}", grounding="red")
 
     if any(k in q for k in ("koude-uren", "chill", "rust-uren")):
         c = snap["chill"]
@@ -129,7 +137,7 @@ def _route_question(question: str) -> dict:
                 f"**{ctx.variety}** heeft nu {c.accumulated_hours:.0f} van de {c.required_hours:.0f} "
                 f"benodigde koude-uren ({c.fraction_complete*100:.0f}%). Bron: {c.source_citation}"
             )
-        return _plain(f"{c.accumulated_hours:.0f} koude-uren opgebouwd, maar drempel voor '{ctx.variety}' nog niet gesourced.")
+        return _plain(f"{c.accumulated_hours:.0f} koude-uren opgebouwd, maar drempel voor '{ctx.variety}' nog niet gesourced.", grounding="red")
 
     if any(k in q for k in ("suzuki", "kersenvlieg", "fruitvlieg", "drosophila")):
         s = snap["suzukii"]
@@ -145,15 +153,54 @@ def _route_question(question: str) -> dict:
     return _ask_advisor(question, snap)
 
 
-for entry in st.session_state["chat_history"]:
+_GROUNDING_BADGE = {
+    "green": ("GEGROND", "Dit antwoord citeert een kennisbank-fragment, tool-resultaat of bron."),
+    "red": ("GEEN GROUNDING GEVONDEN", "Dit antwoord citeert geen bron/tool-resultaat -- "
+                                       "controleer feitelijke beweringen extra kritisch (mogelijke hallucinatie)."),
+}
+
+
+def _render_assistant_message(answer: str, meta: dict, key_prefix: str) -> None:
+    st.markdown(answer)
+    if meta.get("reasoning"):
+        with st.expander("Redenering (CoT)"):
+            st.text(meta["reasoning"])
+    if meta.get("tool_calls"):
+        st.caption("Tools gebruikt: " + ", ".join(meta["tool_calls"]))
+
+    label, uitleg = _GROUNDING_BADGE.get(meta.get("grounding", "red"), _GROUNDING_BADGE["red"])
+    if meta.get("grounding") == "green":
+        st.success(f"{label}: {uitleg}")
+    else:
+        st.error(f"{label}: {uitleg}")
+
+    feedback = meta.get("feedback")
+    if feedback:
+        st.caption(f"Feedback opgeslagen: {'nuttig' if feedback == 'chosen' else 'niet nuttig'} (dank je!)")
+        return
+
+    col1, col2, _rest = st.columns([1, 1, 6])
+
+    def _give_feedback(preference: str) -> None:
+        record = build_feedback_record(
+            question=meta.get("question", ""), answer=answer, reasoning=meta.get("reasoning", ""),
+            sources=meta.get("sources", []), tool_calls=meta.get("tool_calls", []),
+            grounding=meta.get("grounding", "red"), preference=preference,
+        )
+        save_feedback(record)
+        meta["feedback"] = preference
+
+    col1.button("Nuttig", key=f"{key_prefix}_up", on_click=_give_feedback, args=("chosen",))
+    col2.button("Niet nuttig", key=f"{key_prefix}_down", on_click=_give_feedback, args=("rejected",))
+
+
+for i, entry in enumerate(st.session_state["chat_history"]):
     role, msg, meta = entry
     with st.chat_message(role):
-        st.markdown(msg)
-        if meta.get("reasoning"):
-            with st.expander("Redenering (CoT)"):
-                st.text(meta["reasoning"])
-        if meta.get("tool_calls"):
-            st.caption("Tools gebruikt: " + ", ".join(meta["tool_calls"]))
+        if role == "assistant":
+            _render_assistant_message(msg, meta, key_prefix=f"hist_{i}")
+        else:
+            st.markdown(msg)
 
 st.warning(
     "**Fase 1**: vorst/regen/koude-uren/kersenvlieg/vruchtbarsten/middel-vragen gaan via "
@@ -169,11 +216,8 @@ if prompt := st.chat_input("Stel een vraag, bijv. 'is er vorstrisico deze week?'
     with st.chat_message("user"):
         st.markdown(prompt)
     result = _route_question(prompt)
+    result["question"] = prompt
+    result["feedback"] = None
     st.session_state["chat_history"].append(("assistant", result["answer"], result))
     with st.chat_message("assistant"):
-        st.markdown(result["answer"])
-        if result.get("reasoning"):
-            with st.expander("Redenering (CoT)"):
-                st.text(result["reasoning"])
-        if result.get("tool_calls"):
-            st.caption("Tools gebruikt: " + ", ".join(result["tool_calls"]))
+        _render_assistant_message(result["answer"], result, key_prefix=f"new_{len(st.session_state['chat_history'])}")

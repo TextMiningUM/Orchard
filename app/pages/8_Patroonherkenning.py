@@ -132,7 +132,6 @@ KIND_LABELS = {
 }
 
 SEVERITY_ORDER = {"hoog": 2, "matig": 1, "info": 0}
-SEVERITY_ICON = {"hoog": "🔴", "matig": "🟠", "info": "ℹ️"}
 
 
 @st.cache_data(show_spinner=False)
@@ -161,7 +160,7 @@ def _cached_disease_weather_early_warnings(lat: float, lon: float, _entries: lis
 
 def _render_signal_card(signal: SeasonSignal) -> None:
     with st.container(border=True):
-        st.markdown(f"{SEVERITY_ICON.get(signal.severity, '')} **{signal.title}**")
+        st.markdown(f"**{signal.title}** — {signal.severity.upper()}")
         st.write(signal.summary)
         if signal.source_citation:
             st.caption(f"Bron: {signal.source_citation}")

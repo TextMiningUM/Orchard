@@ -1,9 +1,17 @@
 # Ontwerp: Kersenboomgaard Adviseur (Cherry Orchard Advisor) — Track 1 (Orchard domain)
 
-**Status (2026-10-08): ONTWERP + DATA-INVENTARISATIE. Geen code geschreven.** Dit document legt het
-functionele en technische ontwerp vast voordat er één regel implementatiecode wordt geschreven —
-analoog aan hoe `design_captain_missions.md` en `design_chief_engineer.md` in het Auto Pilot-project
-zijn opgezet (zie `C:\Users\jcsch\Documents\Python\Auto Pilot`). Dit is bewust het eerste
+**Status (2026-10-09): ONTWERP + GROTENDEELS GEÏMPLEMENTEERDE WALKING SKELETON.** Dit document is
+begonnen als zuiver ontwerp (Deel A-F, 2026-10-08) vóórdat er één regel implementatiecode was
+geschreven — analoog aan hoe `design_captain_missions.md` en `design_chief_engineer.md` in het
+Auto Pilot-project zijn opgezet (zie `C:\Users\jcsch\Documents\Python\Auto Pilot`). Sindsdien is een
+aanzienlijk deel van Fase 0-3 van de roadmap ([Deel E](#deel-e)) daadwerkelijk gebouwd, getest en
+gedeployed (lokaal + een publieke read-only cloud-demo) — zie **[Deel G — Implementatiestatus](#deel-g)**
+voor het volledige, chronologische verslag van wat er werkelijk staat, inclusief architectuurkeuzes
+die afweken van dit oorspronkelijke ontwerp (met name: **Qwen3-8B in plaats van Mistral** als
+basismodel, zie [B.7](#sec-b7) en [G.4](#sec-g4)). Deel A-F blijven de oorspronkelijke ontwerptekst,
+bijgewerkt in-place waar de werkelijke implementatie ervan afweek of iets concreets invulde — Deel G
+is de aparte "hoe zijn we hier gekomen"-laag erbovenop, zelfde conventie als Auto Pilot's eigen
+design-docs (`design_captain_missions.md` §14-17 is het equivalent daar). Dit is bewust het eerste
 domein-ontwerp van het Orchard-project; latere domeinen (bijv. een appel- of perenboomgaard) zouden
 dezelfde pijplijn met een ander `domain=`-argument moeten hergebruiken, precies zoals VHF/OOW/
 Captain/Chief Engineer in Auto Pilot één pijplijn delen.
@@ -14,8 +22,9 @@ Bronnen voor dit ontwerp:
 - `Docs/Harnessing Artificial Intelligence for Agricultural Transformation 20260713.pdf` (World Bank
   rapport — bredere context/motivatie voor AI in landbouw)
 - `Data/Data Log Books/jaar 2013.pdf` t/m `jaar 2026.pdf` (14 jaar handgeschreven logboeken, gescand —
-  tekstextractie leverde nog geen tekst op: dit zijn beeld-PDF's die OCR/multimodale verwerking nodig
-  hebben, exact zoals het project-document voorspelt)
+  tekstextractie leverde aanvankelijk geen tekst op: dit zijn beeld-PDF's die OCR/multimodale
+  verwerking nodig hebben, exact zoals het project-document voorspelt — **inmiddels opgelost, zie
+  [C.1](#sec-c1)/[G.3](#sec-g3)**)
 - `Data/Data Log Books/Actua steenfruit #6` en `#7` (2026) — vakbladartikelen van **StonefruitConsult**
   (samenwerking Delphy, Caf, Fruitconsult, gevestigd op Agro Business Park, Wageningen) met actueel
   geschreven teeltadvies per moment in het seizoen (koude-uren, bloei, snoei, bespuitingen, bestuiving)
@@ -44,7 +53,7 @@ Bronnen voor dit ontwerp:
   - [B.4 Geheugen: RAG + KG + PG + episodisch logboek](#sec-b4)
   - [B.5 Tools (agentic function calls)](#sec-b5)
   - [B.6 Procedure-/beslissingsregister per teeltfase (shield + mandatory duties)](#sec-b6)
-  - [B.7 Model & training (Mistral, SFT → DPO → Reflection)](#sec-b7)
+  - [B.7 Model & training (Qwen3-8B, SFT → DPO → Reflection)](#sec-b7)
   - [B.8 Lokaal vs. cloud, `AgentPaths`-conventie, folderstructuur](#sec-b8)
   - [B.9 Streamlit-UI (mirror van Engine Room / Captain Mission dashboards)](#sec-b9)
   - [B.10 Evaluatieplan](#sec-b10)
@@ -57,9 +66,23 @@ Bronnen voor dit ontwerp:
   - [C.5 Juridische/regelgeving-bronnen](#sec-c5)
   - [C.6 Vertaalstrategie EN→NL](#sec-c6)
   - [C.7 Gat-analyse — wat ontbreekt nog](#sec-c7)
-- [Deel D — Mapstructuur `Data/Orchard/` (voorstel, nog niet aangemaakt)](#deel-d)
+- [Deel D — Mapstructuur `Data/Orchard/` (gerealiseerd)](#deel-d)
 - [Deel E — Roadmap: walking skeleton eerst](#deel-e)
 - [Deel F — Open vragen](#deel-f)
+- [Deel G — Implementatiestatus (chronologisch verslag van wat werkelijk gebouwd is)](#deel-g)
+  - [G.1 Lokale + cloud-infrastructuur](#sec-g1)
+  - [G.2 Walking skeleton: deterministische kern + Streamlit-app](#sec-g2)
+  - [G.3 Logboek-OCR en -database (Track 2)](#sec-g3)
+  - [G.4 Qwen3-8B live op de cloud-pod (Fase 1)](#sec-g4)
+  - [G.5 Track 1-kennisbank verzamelen (Fase 2)](#sec-g5)
+  - [G.6 RAG + reranking + ReACT-agent + zichtbare CoT (Fase 3 — "Vraag de Adviseur")](#sec-g6)
+  - [G.7 Patroonherkenning: meerjaren-trends](#sec-g7)
+  - [G.8 Seizoenswaarschuwingen en preventieve weer-naar-ziekte-signalen](#sec-g8)
+  - [G.9 Gebruik van Middelen](#sec-g9)
+  - [G.10 Bibliotheek, Help en overige UI-afwerking](#sec-g10)
+  - [G.11 Test- en kwaliteitsstatus](#sec-g11)
+  - [G.12 Belangrijkste geleerde lessen / bugs opgelost](#sec-g12)
+  - [G.13 Git/GitHub en synchronisatie](#sec-g13)
 
 ---
 
@@ -396,10 +419,22 @@ bloei"). Dit register is de orchard-equivalent van Captain's `PROCEDURE_LIBRARY`
 daar — in een apart, puur-Python, geen-LLM-nodig bestand ondergebracht zodra implementatie start.
 
 <a id="sec-b7"></a>
-## B.7 Model & training (Mistral, SFT → DPO → Reflection)
+## B.7 Model & training (Qwen3-8B, SFT → DPO → Reflection)
 
-- **Basismodel**: Mistral (open-weights, zoals gevraagd), vergelijkbare groottes als Auto Pilot's
-  Qwen3-8B-aanpak (7–8B-klasse, lokaal/cloud QLoRA-fine-tunebaar).
+> **Afwijking van het oorspronkelijke ontwerp (2026-10-08, vóór implementatie)**: hieronder stond
+> aanvankelijk Mistral als basismodel genoemd ("open-weights, zoals gevraagd"). Bij de daadwerkelijke
+> keuze (zie [G.4](#sec-g4)) bleek de cloud-GPU-pod maar 24 GB VRAM te hebben — ruim voldoende voor
+> **Qwen3-8B in 4-bit NF4-kwantisatie** (~6 GB), maar krapper voor een vergelijkbaar Mistral-model
+> naast de rest van de stack. Omdat Auto Pilot's eigen Chief Engineer/Captain-domeinen al een volledig
+> uitgewerkte, beproefde Qwen3-8B-laadroutine hebben (`core/qwen_loader.py`,
+> `cloud/qwen_inference_server.py`), is in overleg met de gebruiker gekozen om die route direct te
+> hergebruiken (zelfde "nooit een tweede keer het wiel uitvinden"-regel als de rest van dit project)
+> in plaats van een nieuwe Mistral-laadroutine te bouwen. De rest van deze sectie (SFT → DPO →
+> Reflection-aanpak) blijft ongewijzigd van toepassing, nu met Qwen3-8B in plaats van Mistral.
+
+- **Basismodel**: **Qwen3-8B** (open-weights, 4-bit NF4-kwantisatie, ~6 GB VRAM), rechtstreeks
+  overgenomen van Auto Pilot se eigen `core/qwen_loader.py`/`cloud/qwen_inference_server.py` — zie
+  boven voor de reden waarom dit Mistral verving.
 - **Trainingsketen** (hergebruik van Auto Pilot's `train_sft.py`/`train_dpo.py`/`train_reflection.py`-
   patroon, geparametriseerd met `AUTOPILOT_DOMAIN=Orchard`-achtig mechanisme):
   1. **SFT**: instructie→antwoord-paren uit Track 1 (vakkennis) én Track 2 (logboek-afgeleide
@@ -425,26 +460,34 @@ Hergebruik van Auto Pilot's `core/paths.py`-conventie: zodra implementatie start
 worden gedefinieerd — nooit hardcoded paden in losse scripts. Zie [Deel D](#deel-d) voor de concrete
 mapstructuur die dit oplevert.
 
-Python-omgeving: **`.venv` met Python 3.13** is al aangemaakt in de projectroot
+Python-omgeving: **`.venv` met Python 3.13.16** staat in de projectroot
 (`C:\Users\jcsch\Documents\Python\Orchard\.venv`), analoog aan Auto Pilot se eigen
-project-lokale `.venv`-conventie. Er is nog geen enkel package geïnstalleerd — dat gebeurt pas zodra
-een concreet script die dependency nodig heeft (regel uit de coding-instructies: packages pas
-installeren ná wijziging van een dependency-manifest of bij een concrete import-fout).
+project-lokale `.venv`-conventie — zelfde Python-versie ook op de cloud-pod (via `uv`, zie
+[G.1](#sec-g1)). Inmiddels geïnstalleerd: `streamlit`, `pandas`, `plotly`, `pytest`, `pdfplumber`,
+`beautifulsoup4`, `lxml`, `sentence-transformers` (lokaal, CPU-only — voor RAG/rerank-embeddings),
+en op de cloud-pod aanvullend de volledige ML-stack (`torch` cu128, `transformers`, `peft`, `trl`,
+`bitsandbytes`, ...) voor Qwen3-8B.
 
 <a id="sec-b9"></a>
 ## B.9 Streamlit-UI (mirror van Engine Room / Captain Mission dashboards)
 
-Voorgestelde pagina's, in dezelfde stijl als `Basic Simulator/app/pages/1_Captain_Mission.py` en
-`2_Engine_Room.py`:
+Oorspronkelijk voorgestelde pagina's, in dezelfde stijl als `Basic Simulator/app/pages/1_Captain_Mission.py`
+en `2_Engine_Room.py` — **inmiddels alle 10 daadwerkelijk gebouwd** (geen emoji in bestandsnamen/labels
+meer, zie [G.2](#sec-g2)/[G.10](#sec-g10) voor de reden; de emoji in onderstaande tabel zijn alleen ter
+illustratie van het oorspronkelijke ontwerp-idee). Exacte huidige bestandsnamen staan in
+[Deel D](#deel-d):
 
 | Pagina | Doel | Mirror van |
 |---|---|---|
-| **🍒 Boomgaard Dashboard** | Actuele fenologische status, koude-uren-/GDD-teller, komende verplichte acties, open waarschuwingen | `2_Engine_Room.py` (conditie-annunciator-paneel) |
-| **💬 Vraag de Adviseur** | Chat-interface, ReAct-trace zichtbaar (welke tools zijn aangeroepen, welke bronnen geciteerd) | VHF/Chief Engineer chatbot-interfaces |
+| **🍒 Boomgaard Dashboard** | Actuele fenologische status, koude-uren-/GDD-teller, komende verplichte acties, open waarschuwingen, + weer-van-afgelopen-periode (aanpasbaar, onderaan) | `2_Engine_Room.py` (conditie-annunciator-paneel) |
+| **💬 Vraag de Adviseur** | Chatinterface: deterministische tool-routing eerst, daarna Qwen3-8B met RAG+reranking+ReACT-tool-calling+zichtbare CoT ([G.6](#sec-g6)) | VHF/Chief Engineer chatbot-interfaces |
 | **📅 Seizoensplanning** | Fase-overzicht + brown-envelope-eventlog (vorst, hagel, plaagpiek) over het lopende seizoen | `1_Captain_Mission.py` (Mission Briefing/Log) |
-| **📖 Logboek & Geschiedenis** | Doorzoekbaar overzicht van 2013–2026, plus invoer van nieuwe ingrepen | nieuw (geen directe mirror — Orchard-specifiek) |
+| **📖 Logboek & Geschiedenis** | Doorzoekbaar overzicht van 2013–2026 + weer-context-popup per entry | nieuw (geen directe mirror — Orchard-specifiek) |
 | **⚠️ Waarschuwingen** | Actieve/voorbije alerts (vorst tijdens bloei, regen vóór oogst, kersenvlieg-drempel) | Captain's "brown envelope" monitors |
-| **📈 Patroonherkenning** (toegevoegd 2026-10-09) | Automatische detectie van de meest oogst-relevante patronen in het Track 2-logboek (seizoenstiming-verschuiving, behandelfrequentie- en doseringstrends per categorie, plus een altijd-getoonde teeltkalender), met doorklik naar de onderliggende logboekregels. Detectielogica in `pipeline/orchard_patterns.py` (puur, los getest), UI in `app/pages/8_Patroonherkenning.py` | nieuw (geen directe mirror — Orchard-specifiek; vergelijkbaar in geest met Chief Engineer's `KNOWN_LIMITS`/anomaliedetectie, maar dan over het eigen episodische logboek i.p.v. vaste technische drempels) |
+| **📈 Patroonherkenning** (toegevoegd 2026-10-09) | Drie lagen: (1) seizoenswaarschuwingen (wijkt het gekozen seizoen tot nu toe af van voorgaande jaren qua weer/plaagdruk/bestuivingsweer?), (2) preventieve weer-naar-ziekte-signalen (lijkt het weer van de laatste dagen op wat vroeger een uitbraak voorafging?), (3) automatisch gerangschikte meerjaren-trendpatronen + een altijd-getoonde teeltkalender — alles met doorklik naar de onderliggende logboekregels. Logica in `pipeline/orchard_patterns.py` + `pipeline/orchard_season_watch.py` + `pipeline/orchard_disease_weather_links.py` (alle drie puur, los getest), UI in `app/pages/8_Patroonherkenning.py` | nieuw (geen directe mirror — Orchard-specifiek; vergelijkbaar in geest met Chief Engineer's `KNOWN_LIMITS`/anomaliedetectie, maar dan over het eigen episodische logboek i.p.v. vaste technische drempels) |
+| **📚 Bibliotheek** (toegevoegd 2026-10-08) | Overzicht van en toegang tot de Track 1-kennisbank (download + inline PDF-voorbeeld per document), gevoed door `manifest.json` | nieuw — vergelijkbaar met hoe Chief Engineer's manual-bibliotheek wordt ontsloten, maar dan als eigen pagina i.p.v. alleen RAG-achtergrond |
+| **🧪 Gebruik van Middelen** (toegevoegd 2026-10-09) | Telt alle toegepaste middelen op (gecanonicaliseerd + gecategoriseerd: gewasbescherming schimmel/bacterie, insect/mijt, onkruid; meststof/bladvoeding; hulpstof; bestuiving; eerlijk "overig" waar onzeker), per week/maand/kwartaal/jaar, met drill-down per product. Logica in `pipeline/orchard_middelen.py` | nieuw — directe invulling van het wettelijke "spuitregister"-idee uit [B.6](#sec-b6), nu met een bruikbaar overzicht in plaats van alleen ruwe logboekregels |
+| **❓ Help** (toegevoegd 2026-10-09) | Gebruikersgerichte documentatie (geen techniek): wat elke pagina doet, hoe je 'm gebruikt, veelgestelde vragen | nieuw — Auto Pilot heeft dit niet apart; hier toegevoegd omdat de eindgebruiker (teler) geen ontwikkelaar is |
 
 <a id="sec-b10"></a>
 ## B.10 Evaluatieplan
@@ -494,6 +537,7 @@ Hergebruik van het masterproject-document se eigen evaluatieplan, geconcretiseer
 | Actua Steenfruit vakbladartikelen (StonefruitConsult/Delphy/Caf/Fruitconsult, Wageningen) | `Data/Data Log Books/Actua steenfruit #6 en #7 2026.pdf` | Aanwezig, tekst succesvol geëxtraheerd; zeer bruikbaar als "levend" vakkennis-voorbeeld (koude-uren, snoei-technieken, bespuitingstiming, bestuiving) |
 | Masterproject-briefing | `Docs/Training an Orchard Agentic Chatbot...pdf` | Gelezen, dit ontwerp volgt de scope direct |
 | World Bank AI-in-landbouw rapport | `Docs/Harnessing Artificial Intelligence for Agricultural Transformation...pdf` | Gelezen (voor bredere motivatie/context; geen kersen-specifieke data) |
+| **Track 1-kennisbank (Fase 2, zie [G.5](#sec-g5))** | `Data/Orchard/OrchardKnowledge/<categorie>/*.pdf`/`.html` + `manifest.json` | **7 documenten acquired, 3 bewust geblokkeerd-en-gedocumenteerd, 0 failed.** WUR: `wur_teelthandleidingen_139993.pdf`, `wur_onderstammenproef_zoete_kers_297528.pdf`, `biofruitnet_zoete_kers_onderstammen_nl.pdf` (EU Horizon 2020-project, niet WUR zelf maar in dezelfde map). USDA: `usda_agriculture_handbook_442_sweet_cherries_1973.pdf` (1973, GovInfo, public domain — vervangt de niet-gevonden pre-1930 Farmers' Bulletin 776). Overig: `netafim_kersen_buiten_adviesrapport_2021.pdf` (commercieel, expliciet als zodanig gelabeld), `osu_em9267_spotted_wing_drosophila.pdf` (Oregon State University Extension, Engelstalig, grondt de suzukii-risicofunctie). Geblokkeerd: Ctgb-bulk-export (dode URL), Actua Steenfruit-archief (alleen de 2 al-bezeten nummers, rest achter inlogmuur), pre-1930 USDA-bulletin (geen werkende link gevonden, niet geforceerd). **Bekend, nog open issue**: de eerst-gedownloade EU 2018/848-pagina bleek per ongeluk Engelstalig (zie [Deel F](#deel-f) punt 8) en is expliciet uitgesloten van de RAG-index. |
 
 <a id="sec-c2"></a>
 ## C.2 Nederlandse / Wageningen-bronnen (open data)
@@ -522,13 +566,23 @@ Hergebruik van het masterproject-document se eigen evaluatieplan, geconcretiseer
 <a id="sec-c4"></a>
 ## C.4 Tool-APIs: weer, neerslag, bodem (geverifieerd, direct bruikbaar — dit beantwoordt expliciet de wens om zowel verleden als toekomst weer + neerslag via API te kunnen bevragen)
 
+**Implementatiestatus (2026-10-09)**: Open-Meteo Forecast + Historical zijn **volledig geïmplementeerd
+en live** (`pipeline/orchard_tools.py`: `get_weather_forecast`, `get_weather_history`,
+`get_weather_history_detailed`, `get_weather_window`) en worden door vrijwel elke pagina en elke
+detector in dit project gebruikt. Buienradar-nowcast is **geïmplementeerd** (`get_rain_nowcast`).
+KNMI Open Data en Bodemdata.nl/BOFEK zijn **nog NIET aangesloten** — `get_soil_info()` blijft een
+expliciete `NotImplementedError`-stub (nooit een verzonnen bodemwaarde, zie [B.1](#sec-b1)/[B.11](#sec-b11)).
+Eén belangrijke, pas tijdens implementatie ontdekte quirk: **Open-Meteo's Archive-API heeft nog geen
+data voor "vandaag" zelf** (pas vanaf gisteren beschikbaar) — zie `latest_available_archive_date()`
+in [G.12](#sec-g12).
+
 | API | Dekking | Sleutel nodig? | Gebruik in dit ontwerp |
 |---|---|---|---|
 | **Open-Meteo Forecast API** (`api.open-meteo.com/v1/forecast`) | Toekomst, tot 16 dagen vooruit; uur- en dagwaarden incl. `precipitation`/`precipitation_sum`, temperatuur, wind | Nee (gratis, tot 10.000 calls/dag niet-commercieel) | **Primaire bron voor `get_weather_forecast`** — vorstwaarschuwing, oogst-/spuitplanning vooruit |
-| **Open-Meteo Historical Weather API** (`archive-api.open-meteo.com/v1/archive`) | Verleden, terug tot 1940, uur-/dagwaarden | Nee | **Primaire bron voor `get_weather_history`** — koude-uren/GDD-berekening, kalibratie tegen logboekjaren 2013–2026 |
-| **KNMI Open Data Platform / EDR API** (`developer.dataplatform.knmi.nl`) | Officiële NL-weerstation-waarnemingen (historisch, hoge resolutie) | API-key (gratis aan te vragen) | Secundaire/autoritatieve bron voor NL-specifieke historische kalibratie (nauwkeuriger per weerstation dan het Open-Meteo-model) |
-| **Buienradar `raintext`-endpoint** (`gpsgadget.buienradar.nl/data/raintext`) | Neerslag-nowcasting, 5-min-resolutie, tot 2 uur vooruit | Nee (niet-commercieel, met bronvermelding) | **`get_rain_nowcast`** — hyperlokale beslissing "kan ik nu nog spuiten voor de bui?" |
-| **Bodemdata.nl / BOFEK bodemkaart-API** | Bodemtype/bodemfysische kenmerken per coördinaat | Meestal geen key voor basisgebruik | **`get_soil_info`** — vochthoudend vermogen, bodemtype voor irrigatie-/bemestingsadvies |
+| **Open-Meteo Historical Weather API** (`archive-api.open-meteo.com/v1/archive`) | Verleden, terug tot 1940, uur-/dagwaarden | Nee | **Primaire bron voor `get_weather_history`/`get_weather_history_detailed`** — koude-uren/GDD-berekening, kalibratie tegen logboekjaren 2013–2026, seizoensvergelijking, weer-naar-ziekte-profielen |
+| **KNMI Open Data Platform / EDR API** (`developer.dataplatform.knmi.nl`) | Officiële NL-weerstation-waarnemingen (historisch, hoge resolutie) | API-key (gratis aan te vragen) | **Nog niet geïmplementeerd.** Secundaire/autoritatieve bron voor NL-specifieke historische kalibratie (nauwkeuriger per weerstation dan het Open-Meteo-model) |
+| **Buienradar `raintext`-endpoint** (`gpsgadget.buienradar.nl/data/raintext`) | Neerslag-nowcasting, 5-min-resolutie, tot 2 uur vooruit | Nee (niet-commercieel, met bronvermelding) | **Geïmplementeerd: `get_rain_nowcast`** — hyperlokale beslissing "kan ik nu nog spuiten voor de bui?" |
+| **Bodemdata.nl / BOFEK bodemkaart-API** | Bodemtype/bodemfysische kenmerken per coördinaat | Meestal geen key voor basisgebruik | **Nog niet geïmplementeerd** — `get_soil_info()` is een expliciete stub; bodem-pH/zuurgraad kan daardoor ook nog niet gesignaleerd worden in Patroonherkenning ([G.8](#sec-g8)) |
 
 > **Aanbevolen combinatie**: Open-Meteo als primaire, consistente bron voor zowel verleden (sinds 1940)
 > als toekomst (16 dagen) in één simpele, sleutelloze API — ideaal voor de koude-uren-/GDD-/
@@ -539,12 +593,20 @@ Hergebruik van het masterproject-document se eigen evaluatieplan, geconcretiseer
 <a id="sec-c5"></a>
 ## C.5 Juridische/regelgeving-bronnen
 
+**Implementatiestatus (2026-10-09)**: geen van deze bronnen is operationeel aangesloten als live tool
+— `check_ctgb_toelating()` is een bewuste `NotImplementedError`-stub (zie [B.11](#sec-b11): nooit een
+verzonnen toelatingsstatus). Bij navraag (2026-10-08) bleek de veelgeciteerde Ctgb-bulk-export-URL
+hieronder **dood** (DNS-fout) en `toelatingen.ctgb.nl` zelf een 403'd JS-vereiste SPA — dit blijft een
+open gat. EUR-Lex is wél bevraagd voor Reg. 2018/848 ([C.1](#sec-c1)), maar leverde onbedoeld
+Engelstalige tekst op (content-negotiation-probleem, zie [Deel F](#deel-f) punt 8) en is daarom nog
+niet in de kennisbank opgenomen.
+
 | Bron | Wat | Link |
 |---|---|---|
 | **Ctgb MST Public API** | Programmatische toegang tot toegelaten/vervallen middelen, doseringen, gewasindicaties | docs.mstpublicapi.apiary.io, open source API-spec: github.com/trivento/ctgb-mst-public-api |
-| **Ctgb dagelijkse bulk-export** | Volledige Excel-export van alle toelatingen (CC-0-licentie, vrij herbruikbaar) | ctgb.blob.core.windows.net/documents/public-authorisations-report.xls |
-| **data.overheid.nl dataset "Bestrijdingsmiddelendatabank"** | Open-datacatalogus-ingang naar dezelfde Ctgb-data | data.overheid.nl |
-| **EUR-Lex / ELI** | Reg. (EU) 2018/848 (biologische productie) + overige EU-landbouwrichtlijnen, machine-leesbaar via ELI-links en (beperkt) XML/RDF | eur-lex.europa.eu |
+| **Ctgb dagelijkse bulk-export** | Volledige Excel-export van alle toelatingen (CC-0-licentie, vrij herbruikbaar) | **DOOD (bevestigd 2026-10-08)**: ctgb.blob.core.windows.net/documents/public-authorisations-report.xls resolvet niet meer |
+| **data.overheid.nl dataset "Bestrijdingsmiddelendatabank"** | Open-datacatalogus-ingang naar dezelfde Ctgb-data | data.overheid.nl (nog niet geprobeerd als alternatief) |
+| **EUR-Lex / ELI** | Reg. (EU) 2018/848 (biologische productie) + overige EU-landbouwrichtlijnen, machine-leesbaar via ELI-links en (beperkt) XML/RDF | eur-lex.europa.eu — **acquired maar Engelstalig gebleken, zie boven** |
 
 <a id="sec-c6"></a>
 ## C.6 Vertaalstrategie EN→NL
@@ -587,38 +649,115 @@ wel gebruiken, maar we moeten het eerst vertalen naar NL voor we het omzetten na
 - **Eigen bodemdata**: BOFEK geeft een landelijke bodemkaart-schatting; voor precisie is eigen
   grondmonster-/pH-/EC-historie van de boomgaard wenselijk (nog niet aangetroffen in de huidige
   datamap).
-- **Bijenvolken-/bestuiverregistratie**: geen historische data hierover aangetroffen; nodig voor het
-  bestuiver-shield ([B.11](#sec-b11)).
+- **Bijenvolken-/bestuiverregistratie**: geen aparte historische data hierover aangetroffen, maar de
+  logboeken zelf blijken wél incidentele bijen/hommel-kasten-notities te bevatten (bv. "2 kasten van
+  Nico") — deze zijn in [G.9](#sec-g9) als eigen categorie ("bestuiving") herkend i.p.v. als middel
+  meegeteld. Een systematische bestuiver-registratie (hoeveel volken, wiens kasten, wanneer geplaatst)
+  ontbreekt nog steeds; nodig voor het bestuiver-shield ([B.11](#sec-b11)).
 - **Oogst-/opbrengstcijfers**: het masterproject-document noemt dit expliciet als aparte categorie
-  ("Harvest and Yield Records") — nog niet aangetroffen in `Data/`; nodig om advies daadwerkelijk aan
-  opbrengst te kunnen koppelen (de kern van "maximale opbrengst" uit de opdracht).
+  ("Harvest and Yield Records") — nog steeds niet aangetroffen in `Data/`; nodig om advies
+  daadwerkelijk aan opbrengst te kunnen koppelen (de kern van "maximale opbrengst" uit de opdracht).
+  Dit blijft de belangrijkste blokkerende data-leemte voor een toekomstige DPO-trainingsronde die
+  daadwerkelijk op opbrengst optimaliseert in plaats van op "lijkt op wat de teler deed".
+- **Ctgb-toelatingsdata**: bulk-export-URL bleek dood (zie [C.5](#sec-c5)) — blijft een open gat,
+  `check_ctgb_toelating()` is en blijft een expliciete stub.
+- **Bodem-pH/zuurgraad**: nog steeds geen echte koppeling (zie [C.4](#sec-c4)) — concreet gemist bij
+  de bouw van Patroonherkenning's seizoenswaarschuwingen ([G.8](#sec-g8)), waar "te zure grond" als
+  voorbeeld werd genoemd maar NIET gesignaleerd kon worden; `soil_ph_status_note()` toont in de UI
+  expliciet dat dit ontbreekt in plaats van iets te verzinnen.
+- **Pre-1930 USDA-bulletin** (Farmers' Bulletin 776, "Growing Cherries East of the Rocky Mountains"):
+  geen werkende digitale kopie gevonden deze sessie (zie [C.1](#sec-c1)); USDA Agriculture Handbook
+  442 (1973) dekt vergelijkbare stof en is wel acquired.
+- **Middelnaam-identiteit onzeker voor enkele producten**: bij het bouwen van Gebruik van Middelen
+  ([G.9](#sec-g9)) bleven 27 van de 1026 toepassingen (2,6%) bewust ongeclassificeerd ("overig") omdat
+  de identiteit van de ruwe naam niet met zekerheid kon worden vastgesteld (met name 13× "Tracor" —
+  mogelijk een OCR-variant van het insecticide "Tracer", maar niet met voldoende zekerheid om dat aan
+  te nemen). Zie `pipeline/orchard_middelen.py`'s `_ONZEKER_OVERIG` voor de volledige lijst.
 
 ---
 
 <a id="deel-d"></a>
-# Deel D — Mapstructuur `Data/Orchard/` (voorstel, nog niet aangemaakt)
+# Deel D — Mapstructuur `Data/Orchard/` (gerealiseerd)
 
-Mirror van Auto Pilot's `AgentPaths`-conventie (zie [B.8](#sec-b8)); dit is puur een **voorstel** —
-er wordt in deze ontwerpfase nog niets aangemaakt:
+Mirror van Auto Pilot's `AgentPaths`-conventie (zie [B.8](#sec-b8)), zoals die bij implementatie
+daadwerkelijk is gerealiseerd (`core/paths.py`'s `AgentPaths.orchard()`) — dit is dus niet langer een
+voorstel maar de werkelijke mapstructuur op zowel de laptop als de cloud-pod:
 
 ```
-Orchard/
-├── Docs/                                  (bestaand — project-briefings)
+Orchard/                                    (GitHub: https://github.com/TextMiningUM/Orchard, zie [G.13](#sec-g13))
+├── .github/
+│   └── copilot-instructions.md            ← werkafspraken/conventies voor dit repo
+├── .venv/                                  ← Python 3.13.16 (lokaal); pod heeft eigen .venv via `uv`
+├── Docs/                                   (bestaand, gitignored — project-briefings blijven lokaal)
+├── Images/                                 (bestaand, gitignored — herkomst onzeker, zie .gitignore)
 ├── Data/
-│   ├── Data Log Books/                    (bestaand — ruwe PDF/MSG-bronnen, ongewijzigd laten)
-│   └── Orchard/                           ← nieuw, data_root
-│       ├── OrchardKnowledge/              ← source_dir: WUR/Actua Steenfruit/USDA/EU-wetgeving (vertaald NL)
-│       ├── OrchardLogbooks/                ← OCR-output van de 14 jaar scans, gestructureerd JSON
-│       ├── Orchard_Eval/                   ← held-out gold Q&A + scenario's (nooit trainen op)
-│       │   ├── orchard_gold_qa.json
-│       │   └── orchard_scenarios.json
-│       ├── Orchard_JSON/                   ← gestructureerde tussen-output (§8-equivalent)
-│       └── Orchard_Agents_Training/        ← RAG/KG/PG-index, reasoning traces, SFT/DPO/Reflection-bestanden
+│   ├── Data Log Books/                    (bestaand, GITIGNORED — eigen bedrijfsgegevens, zie G.13)
+│   └── Orchard/                           ← data_root, AgentPaths.orchard()
+│       ├── OrchardKnowledge/              ← source_dir: Track 1 (getrackt in git)
+│       │   ├── wur_groenkennisnet/        (3 documenten, zie C.1)
+│       │   ├── usda_historisch/           (1 document)
+│       │   ├── eu_wetgeving/              (1 document, NOG NIET in RAG-index, zie Deel F #8)
+│       │   ├── teelt_advies/              (1 document, Netafim)
+│       │   ├── suzukii_swd/               (1 document, OSU)
+│       │   └── manifest.json              ← provenance (url/sha256/status) voor elk document
+│       ├── OrchardLogbooks/               ← GITIGNORED (eigen bedrijfsgegevens)
+│       │   ├── orchard_logbook.db         ← SQLite: pages/entries/toepassingen (487/1063 rijen)
+│       │   ├── _transcripts/*.json        ← ruwe visuele-transcriptie-tussenresultaten
+│       │   └── _raw_page_images/          ← gerenderde scans (91 PNG's)
+│       ├── Orchard_JSON/                  ← GITIGNORED, regenereerbaar: geparste Track 1-documenten
+│       │   (per-document JSON, output van parse_orchard_documents.py)
+│       ├── Orchard_Agents_Training/       ← GITIGNORED, regenereerbaar: RAG-index
+│       │   (orchard_rag_chunks.json, orchard_rag_embeddings.npy, orchard_rag_chunk_ids.json)
+│       ├── Orchard_Eval/                  ← held-out gold Q&A + scenario's (NOG NIET aangemaakt)
+│       └── orchard_settings.json          ← GITIGNORED: persisted lat/lon/adres (echte boomgaardlocatie)
 ├── _models/
-│   ├── hf_cache/                          ← gedeeld
-│   └── Orchard/                           ← fine-tuned Mistral-adapters/merges
-└── .venv/                                  (reeds aangemaakt, Python 3.13)
+│   ├── hf_cache/                          ← gedeeld, GITIGNORED
+│   └── Orchard/                           ← toekomstige fine-tuned Qwen3-8B-adapters (nog leeg)
+├── app/                                   ← Streamlit-app
+│   ├── Home.py
+│   ├── orchard_common.py                  ← gedeelde helpers: AgentPaths, sidebar, settings, weer-popup
+│   └── pages/
+│       ├── 1_Boomgaard_Dashboard.py
+│       ├── 2_Vraag_de_Adviseur.py
+│       ├── 3_Seizoensplanning.py
+│       ├── 4_Logboek.py
+│       ├── 5_Waarschuwingen.py
+│       ├── 6_Logboek_Verifieren.py        (op de publieke pod: hernoemd naar `_6_...py.disabled`)
+│       ├── 7_Bibliotheek.py
+│       ├── 8_Patroonherkenning.py
+│       ├── 9_Gebruik_van_Middelen.py
+│       └── 10_Help.py                     ← nieuw, zie G.10
+├── core/
+│   ├── paths.py                           ← AgentPaths(domain="Orchard")
+│   ├── io.py, qwen_loader.py
+├── pipeline/
+│   ├── orchard_phenology_spec.py          ← deterministische kern (koude-uren/GDD/vorst/suzukii/barst)
+│   ├── orchard_tools.py                   ← Open-Meteo/Buienradar/geocoding/Ctgb-stub/bodem-stub
+│   ├── orchard_rag.py                     ← RAG-retrieval + reranking (Fase 3)
+│   ├── orchard_tool_catalog.py            ← ReACT-tool-catalogus voor de chatbot
+│   ├── orchard_agent.py                   ← ask_orchard_advisor() (RAG+ReACT+CoT)
+│   ├── orchard_patterns.py                ← meerjaren-patroonherkenning (Patroonherkenning-pagina)
+│   ├── orchard_season_watch.py            ← seizoenswaarschuwingen (idem)
+│   ├── orchard_disease_weather_links.py   ← preventieve weer-naar-ziekte-signalen (idem)
+│   ├── orchard_middelen.py                ← canonicalisatie/categorisatie middelen (Gebruik van Middelen)
+│   ├── qwen_remote.py                     ← HTTP-client naar de cloud-Qwen-server
+│   └── ingest/
+│       ├── build_logbook_database.py      ← Track 2: OCR-transcripten -> SQLite
+│       ├── build_orchard_corpus.py        ← Track 1: downloaden + manifest.json
+│       ├── parse_orchard_documents.py     ← Track 1: PDF/HTML -> genormaliseerd JSON
+│       └── build_orchard_rag.py           ← Track 1: chunken + embedden -> RAG-index
+├── cloud/
+│   └── qwen_inference_server.py           ← localhost-only Qwen3-8B-server (poort 8811) op de pod
+├── tests/                                 ← 139 tests (pytest), zie G.11
+├── design_cherry_orchard_advisor.md       ← dit document
+├── README.md
+└── requirements.txt
 ```
+
+Cloud-pod (`45.135.57.59`, LeafCloud, NVIDIA A30 24GB — zie [G.1](#sec-g1)): spiegelt bovenstaande
+structuur 1-op-1 onder `/home/ubuntu/Orchard`, met twee extra systemd-services
+(`orchard-streamlit`, `orchard-qwen`) en een nginx-reverse-proxy + Let's Encrypt-certificaat voor
+`https://45-135-57-59.sslip.io`.
 
 ---
 
@@ -626,20 +765,36 @@ Orchard/
 # Deel E — Roadmap: walking skeleton eerst
 
 Mirror van Captain's eigen aanpak (§14 `design_captain_missions.md`, "Approach: walking skeleton
-first") — niet alles tegelijk bouwen, maar in deze volgorde:
+first") — niet alles tegelijk bouwen, maar in deze volgorde. **Status per 2026-10-09** toegevoegd per
+stap (zie [Deel G](#deel-g) voor het volledige verhaal); de daadwerkelijke volgorde week op een paar
+punten af van het oorspronkelijke plan (met name: de Streamlit-app en de deterministische kern kwamen
+eerder dan Track 1-RAG, en training (stap 5/7) is nog niet gestart — eerst is een werkend,
+tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
 
 1. **Data gereedheid**: OCR van de logboeken + JSON-structurering (hoogste prioriteit, blokkeert
-   Track 2 volledig).
+   Track 2 volledig). — ✅ **GEDAAN** (91/91 pagina's, zie [G.3](#sec-g3)).
 2. **Deterministische kern v0**: koude-uren + GDD-berekening, gevalideerd tegen 1–2 bekende seizoenen
-   uit de logboeken.
+   uit de logboeken. — ✅ **GEDAAN** (`pipeline/orchard_phenology_spec.py`, zie [G.2](#sec-g2)).
 3. **Tool-laag v0**: Open-Meteo (verleden+toekomst) + Ctgb-opzoekfunctie, zonder LLM — puur
-   geverifieerde data-ophaal-functies.
-4. **RAG v0**: alleen Track 1 (WUR/Actua Steenfruit/Ctgb), nog zonder logboeken.
-5. **Eerste Mistral-SFT**: basis vraag-antwoord-gedrag op Track 1-data.
-6. **Track 2 erbij**: zodra OCR klaar is, logboek-RAG + conversational SFT-data toevoegen.
-7. **DPO**: biologisch-vs-chemisch-voorkeur.
-8. **Streamlit-dashboard v0**: alleen het Boomgaard Dashboard + Chat-pagina.
-9. **Evaluatie + ablaties**: pas zinvol zodra stap 1–7 staan.
+   geverifieerde data-ophaal-functies. — ✅ **GEDAAN voor weer/neerslag/geocoding**; Ctgb/bodem blijven
+   bewuste stubs (zie [C.4](#sec-c4)/[C.5](#sec-c5)).
+4. **RAG v0**: alleen Track 1 (WUR/Actua Steenfruit/Ctgb), nog zonder logboeken. — ✅ **GEDAAN**
+   (7 documenten, dense retrieval + reranking, zie [G.5](#sec-g5)/[G.6](#sec-g6)).
+5. **Eerste Mistral-SFT**: basis vraag-antwoord-gedrag op Track 1-data. — ⬜ **NOG NIET GESTART.**
+   Qwen3-8B draait wel al live (basismodel, geen fine-tuning), met RAG+tools+CoT als tussenstap i.p.v.
+   te wachten op een trainingsronde — zie de afwijking hierboven en [G.6](#sec-g6).
+6. **Track 2 erbij**: zodra OCR klaar is, logboek-RAG + conversational SFT-data toevoegen. — 🟡
+   **DEELS**: de logboek-data wordt al live gebruikt door Patroonherkenning/Seizoenswaarschuwingen/
+   Gebruik van Middelen ([G.7](#sec-g7)-[G.9](#sec-g9)), maar nog niet als RAG-bron voor de chatbot
+   zelf, en nog geen conversational-SFT-dataset gebouwd.
+7. **DPO**: biologisch-vs-chemisch-voorkeur. — ⬜ **NOG NIET GESTART** als trainingsstap; wel is er nu
+   een UI-mechanisme om voorkeursparen te VERZAMELEN (duim omhoog/omlaag op elk antwoord, zie
+   [G.6](#sec-g6)) — de daadwerkelijke DPO-trainingsronde zelf volgt later, zodra er genoeg paren zijn.
+8. **Streamlit-dashboard v0**: alleen het Boomgaard Dashboard + Chat-pagina. — ✅ **GEDAAN, en ver
+   voorbij v0**: 10 pagina's totaal, zie [B.9](#sec-b9)/[G.10](#sec-g10).
+9. **Evaluatie + ablaties**: pas zinvol zodra stap 1–7 staan. — ⬜ **NOG NIET GESTART** (geen gouden
+   eval-set, zie [Deel F](#deel-f) punt 5/9); 139 UNIT-tests bestaan wel (zie [G.11](#sec-g11)), maar
+   dat is iets anders dan een agronomische kwaliteits-evaluatie.
 
 ---
 
@@ -672,3 +827,339 @@ first") — niet alles tegelijk bouwen, maar in deze volgorde:
    `SKIP_FROM_RAG`) totdat een echt Nederlandstalige versie is bevestigd — ofwel door het later
    opnieuw (rustiger) te proberen, ofwel door de Engelse tekst alsnog te vertalen conform het
       project's eigen "eerst vertalen naar NL, dan agentic maken"-regel (zie Sec C.6).
+9. **Oogst-/opbrengstcijfers blijven de belangrijkste openstaande data-leemte** (zie ook [C.7](#sec-c7)):
+   zonder deze cijfers kan geen enkel onderdeel van het systeem daadwerkelijk op "maximale opbrengst"
+   geoptimaliseerd/geëvalueerd worden — alle huidige patroondetectie ([G.7](#sec-g7)-[G.9](#sec-g9))
+   werkt noodgedwongen op *proxy*-signalen (behandelfrequentie, weer, timing), niet op uitkomst.
+10. **Is "Tracor" (13× in het logboek) een schrijfvariant van het insecticide "Tracer"?** Bij het
+    bouwen van Gebruik van Middelen ([G.9](#sec-g9)) leek dit aannemelijk maar niet zeker genoeg om
+    aan te nemen — bewust in categorie "overig" gehouden. Alleen de teler zelf kan dit met zekerheid
+    bevestigen.
+11. **Duim-omhoog/omlaag-feedback en DPO-training** (toegevoegd 2026-10-09, zie [G.6](#sec-g6)): de
+    chatbot verzamelt nu voorkeursparen, maar er is nog geen besluit over (a) hoeveel paren nodig zijn
+    vóór een eerste DPO-trainingsronde zinvol is, en (b) of een duim-omlaag zonder toelichting genoeg
+    signaal geeft, of dat de teler ook een korte reden zou moeten kunnen opgeven.
+12. **Hallucinatiedetectie is een heuristiek, geen garantie** (zie [G.6](#sec-g6)): de huidige
+    rood/groen-indicatie herkent OF een antwoord zich baseert op aangeleverde RAG-fragmenten/
+    tool-resultaten, niet OF de inhoud daadwerkelijk feitelijk correct is. Een antwoord kan "groen"
+    zijn (goed gegrond) en toch een verkeerde conclusie trekken uit de aangeleverde data, of "rood"
+    zijn voor een onschuldige, algemene uitspraak die geen grounding nodig had. Dit moet in de UI
+    duidelijk blijven (geen vals gevoel van zekerheid).
+
+---
+
+<a id="deel-g"></a>
+# Deel G — Implementatiestatus (chronologisch verslag van wat werkelijk gebouwd is)
+
+Dit deel is géén ontwerp meer — het is het chronologische, eerlijke verslag van wat er sinds
+2026-10-08 daadwerkelijk gebouwd, getest en gedeployed is, in dezelfde geest als Auto Pilot's eigen
+`design_captain_missions.md` §14-17 ("de echte implementatielog — neem nooit 'alleen ontwerp' aan
+zonder dit gelezen te hebben"). Waar iets afweek van Deel A-F staat dat hier expliciet benoemd, en is
+Deel A-F zelf ook bijgewerkt met een verwijzing hierheen.
+
+<a id="sec-g1"></a>
+## G.1 Lokale + cloud-infrastructuur
+
+- **Lokaal**: `.venv` met Python 3.13.16 in de projectroot, Streamlit draait op `localhost:8511`.
+- **Cloud-pod**: LeafCloud-instance `orchard-v2` (IP `45.135.57.59`), type `eg1.a30x1.V8-32` =
+  1× NVIDIA A30 (24 GB VRAM). NVIDIA-driver 570 + CUDA 12.8 geïnstalleerd (reboot nodig geweest).
+  Python 3.13 via `uv` (de deadsnakes-PPA had geen Ubuntu-focal-packages beschikbaar). Volledige
+  ML-stack geïnstalleerd: `torch` (cu128), `transformers`, `peft`, `trl`, `bitsandbytes`, later
+  aangevuld met `sentence-transformers`/`pdfplumber`/`beautifulsoup4`/`lxml` voor de RAG-pipeline
+  (torch bleef ongemoeid — pip zag de al-geïnstalleerde versie als voldoende, geen herdownload nodig).
+- **Publieke read-only deployment**: nginx reverse-proxy (poort 80/443 → Streamlit's interne 8501),
+  twee systemd-services (`orchard-streamlit`, `orchard-qwen`) zodat beide overleven na
+  SSH-disconnect/reboot. De schrijfbare Logboek-Verifiëren-pagina is op de pod uitgeschakeld door het
+  bestand te hernoemen naar `_6_Logboek_Verifieren.py.disabled` (Streamlit negeert bestanden die met
+  `_` beginnen — geen code verwijderd, alleen onzichtbaar voor de publieke pagina-navigatie) en de
+  database-file is `chmod 444` gezet.
+- **HTTPS**: geen eigen domein beschikbaar, dus `sslip.io` gebruikt (`45-135-57-59.sslip.io` resolvet
+  automatisch naar dat IP) om een Let's Encrypt-certificaat te kunnen aanvragen via certbot — werkend
+  HTTPS + HTTP→HTTPS-redirect + automatische renewal-timer.
+- **Netwerk-beperking ontdekt**: LeafCloud's standaard security group staat alleen SSH(22)/HTTP(80)/
+  HTTPS(443) van buitenaf toe, ook als een proces op bijv. poort 8501 aan `0.0.0.0` bindt — vandaar de
+  nginx-reverse-proxy-opzet in plaats van Streamlit direct extern te ontsluiten.
+- **Poortconflict opgelost**: de Qwen-inferentieserver draait op poort **8811**, niet het "default"
+  8801, omdat de gebruiker al een lokale SSH-tunnel op 8801 had staan naar een ANDER
+  Auto-Pilot-Qwen-proces — gedocumenteerd in zowel `cloud/qwen_inference_server.py` als
+  `pipeline/qwen_remote.py` zodat dit niet per ongeluk terugverandert.
+
+<a id="sec-g2"></a>
+## G.2 Walking skeleton: deterministische kern + Streamlit-app
+
+- `core/paths.py`: `AgentPaths`-conventie, direct overgenomen van Auto Pilot, vereenvoudigd tot één
+  domein (`AgentPaths.orchard()`).
+- `pipeline/orchard_phenology_spec.py`: pure, deterministische functies voor koude-uren (Weinberger
+  0-7,2°C-venster), growing-degree-days, nachtvorst-risico, suzuki-fruitvlieg-risico,
+  vruchtbarsten-risico — elk met een `source_citation`-veld en een expliciet "illustrative placeholder"
+  vs. "real, cited"-label (nooit stilzwijgend een drempel verzinnen).
+- `pipeline/orchard_tools.py`: Open-Meteo forecast/historical/window, Buienradar-nowcast,
+  Nominatim+Open-Meteo-geocoding; `check_ctgb_toelating()`/`get_soil_info()` blijven expliciete
+  `NotImplementedError`-stubs.
+- Streamlit-app: `app/Home.py` + aanvankelijk 5, nu 10 pagina's (zie [B.9](#sec-b9)).
+- **Emoji volledig verwijderd** uit alle UI-labels/bestandsnamen/knoppen (op expliciet verzoek) —
+  Streamlit genereert navigatielabels automatisch uit bestandsnamen, dus bestanden zijn hernoemd
+  i.p.v. alleen de titel-tekst aan te passen.
+- Hero-afbeelding (`Images/kersenboomgaard-...jpg`) toegevoegd aan de Home-pagina — **blijft
+  gitignored** omdat de bestandsnaam een WordPress-media-patroon suggereert (mogelijk niet eigen
+  auteursrecht), zie [G.13](#sec-g13).
+- Alles getest via `pytest` + `streamlit.testing.v1.AppTest` (smoke-check: elke pagina moet
+  exceptie-vrij renderen).
+
+<a id="sec-g3"></a>
+## G.3 Logboek-OCR en -database (Track 2)
+
+- Alle 91 pagina's (`Data/Data Log Books/jaar 2013.pdf` … `jaar 2026.pdf`) gerenderd naar PNG en
+  visueel getranscribeerd (multimodaal, geen klassieke OCR-engine) door meerdere parallelle
+  achtergrond-agents, elk een jaar-reeks.
+- `pipeline/ingest/build_logbook_database.py`: bouwt `Data/Orchard/OrchardLogbooks/orchard_logbook.db`
+  (SQLite: `pages`/`entries`/`toepassingen`) uit de transcriptie-JSONs, met een `--force`-vangrail
+  tegen het per ongeluk overschrijven van al-geverifieerde rijen. Resultaat: **487 entries, 1063
+  toepassingen, periode 2013-05-08 t/m 2025-11-07, 163 entries (33%) `onzeker=true`**.
+  464/487 (95%) entries hebben een bruikbare `datum_iso`.
+  - *Bekende eigenaardigheid*: één logboekregel bleek een vooruitgeschreven, later doorgehaalde regel
+    in het 2022-boekje te zijn voor 2023 — een voorbeeld van waarom `datum_iso` (de echte datum op de
+    regel) leidend is, niet `pages.jaar` (welk fysiek boekje het is).
+- `app/pages/4_Logboek.py`: doorzoekbaar op jaar/middel/zekerheid, met een weer-contextknop per entry.
+- `app/pages/6_Logboek_Verifieren.py`: menselijk verificatie-werkproces met roteer-/zoomknoppen op de
+  originele scan-afbeelding (uitgeschakeld op de publieke pod, zie [G.1](#sec-g1)).
+- **Weer-in-context-popup** (`app/orchard_common.py::render_weather_dialog_button`, gedeeld tussen
+  Logboek en Logboek Verifiëren): toont het weer van de week ervoor/erna rond een logboekregel
+  (regen, wind(richting), temperatuur, zonuren, ET0) — met expliciete afronding
+  (`st.column_config.NumberColumn`, 1 decimaal, ET0 2 decimalen; Python-`round()` alléén bleek
+  onvoldoende om `st.dataframe()`'s eigen weergave te sturen).
+- **Adres-geocoding**: sidebar-invoerveld dat een adres omzet naar lat/lon (Nominatim/OpenStreetMap —
+  Open-Meteo's eigen geocoder bleek alleen plaatsnamen te herkennen, geen volledige straatadressen) en
+  persisteert naar `Data/Orchard/orchard_settings.json` (gitignored, bevat de echte locatie).
+- **Dashboard-uitbreiding**: "weer van de afgelopen periode" (aanpasbare schuifbalk 7-90 dagen) onderaan
+  `1_Boomgaard_Dashboard.py` — bewust onderaan, want "komend weer is belangrijker".
+
+<a id="sec-g4"></a>
+## G.4 Qwen3-8B live op de cloud-pod (Fase 1)
+
+- `core/qwen_loader.py`, `cloud/qwen_inference_server.py`, `pipeline/qwen_remote.py`: direct
+  overgenomen van Auto Pilot, vereenvoudigd tot één domein ("Orchard").
+- Qwen3-8B gedownload in 4-bit NF4-kwantisatie (~6 GB VRAM van de 24 GB beschikbaar) — de volledige
+  bf16-gewichten (~16 GB) moeten wel eerst gedownload worden (bitsandbytes kwantiseert pas bij het
+  laden, niet vooraf op schijf), wat met de pod se beperkte bandbreedte (~3,5 MB/s) 75-90 minuten duurde.
+  Dit was ook de reden om voor Qwen3-8B i.p.v. Mistral te kiezen (zie [B.7](#sec-b7)).
+  - Er is overwogen een nog kleiner model te nemen, maar Qwen3-8B past ruim en Auto Pilot had er al
+    een beproefde laadroutine voor.
+- Gedeployed als systemd-service `orchard-qwen` (localhost-only, poort 8811 — zie [G.1](#sec-g1)).
+- "Vraag de Adviseur"-pagina herbedraad: deterministische tool-routing blijft eerst en autoritatief;
+  alleen niet-gematchte vragen gaan naar het echte Qwen3-8B (met een expliciete
+  hallucinatie-waarschuwing, want nog geen RAG/training in deze fase). Bevestigd: Qwen antwoordt vlot
+  in het Nederlands, maar hallucineert domeinfeiten (verwacht, pre-RAG).
+- Lokale `.env` met `ORCHARD_CLOUD_SSH_HOST/KEY/USER` voor automatisch SSH-tunnel-herverbinden vanaf de
+  laptop (`pipeline/qwen_remote.reconnect_tunnel()`).
+
+<a id="sec-g5"></a>
+## G.5 Track 1-kennisbank verzamelen (Fase 2)
+
+- `pipeline/ingest/build_orchard_corpus.py`: een `SOURCES`-registry + `manifest.json`-provenance-writer,
+  rechtstreekse mirror van Auto Pilot's `build_chief_engineer_corpus.py`-opzet — elke URL is
+  handmatig geverifieerd vóórdat hij in de registry komt, nooit een gegokte/plausibel-ogende link.
+- **Eerste ronde (4 documenten)**: WUR-teelthandleiding, WUR-onderstammenproef zoete kers, USDA
+  Agriculture Handbook 442 (1973, GovInfo, public domain — vervangt de niet-gevonden pre-1930
+  Farmers' Bulletin 776), EU 2018/848 (HTML, bleek later Engelstalig — zie [Deel F](#deel-f) #8).
+- **Tweede ronde (+3 documenten)**: Netafim-kersenadviesrapport (commercieel, als zodanig gelabeld),
+  Biofruitnet-onderstammen-factsheet (EU Horizon 2020-project), OSU EM9267
+  (Spotted Wing Drosophila-gids, Oregon State University Extension — grondt eindelijk de suzukii-
+  risicofunctie op een echte, citeerbare bron i.p.v. "illustrative placeholder").
+- **Bewust niet gebruikt**: een door websearch gesuggereerde WUR-edepot-ID voor een Nederlandstalige
+  suzuki-fruitvlieg-factsheet bleek bij download een compleet ander (tuinbouw-statistiek) document te
+  zijn — niet gebruikt, zelfde les als de eerdere FB1399-misser (nooit een gesuggereerde
+  bron-ID vertrouwen zonder de gedownloade inhoud te verifiëren).
+- **Geblokkeerd, eerlijk gedocumenteerd**: Ctgb-bulk-export (dode URL), Actua Steenfruit-archief
+  (alleen de 2 al-bezeten nummers), pre-1930 USDA-bulletin.
+- Resultaat: **7 acquired, 3 blocked, 0 failed** — zie [C.1](#sec-c1) voor de volledige lijst.
+
+<a id="sec-g6"></a>
+## G.6 RAG + reranking + ReACT-agent + zichtbare CoT (Fase 3 — "Vraag de Adviseur")
+
+- **Parsen**: `pipeline/ingest/parse_orchard_documents.py` (pdfplumber voor PDF, BeautifulSoup voor
+  HTML) → per-document JSON in `Data/Orchard/Orchard_JSON/`. Het EU-2018/848-bestand wordt hier bewust
+  overgeslagen (`SKIP_FROM_RAG`).
+- **Chunken + embedden**: `pipeline/ingest/build_orchard_rag.py` — eenvoudiger dan Auto Pilot's eigen
+  TextTiling-gebaseerde chunker (bewust: bij 6 documenten is dat disproportioneel), paragraaf-bewust
+  token-budget-chunken (~220 woorden, 30 woorden overlap). Embedding-model:
+  `sentence-transformers/paraphrase-multilingual-mpnet-base-v2` (niet Auto Pilot's Engelstalige
+  `BAAI/bge-large-en-v1.5`, want deze kennisbank mengt NL en EN). Resultaat: **347 doorzoekbare
+  fragmenten**.
+- **Retrieval + reranking**: `pipeline/orchard_rag.py` — dense cosine-similarity-zoekopdracht (brede
+  kandidatenpool) gevolgd door een pretrained multilingual cross-encoder
+  (`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, Nederlands is een van mMARCO's 14 talen) die
+  herscoort naar de uiteindelijke top-k — bewust GEEN zelf-getrainde reranker (nog geen gouden
+  eval-set om op te trainen, zie Auto Pilot's eigen `train_reranker.py`-precedent).
+- **Tool-catalogus**: `pipeline/orchard_tool_catalog.py` bindt de bestaande deterministische tools
+  (weer, koude-uren, vorst, suzuki, vruchtbarsten, Ctgb-guardrail) + een kennisbank-zoektool als
+  aanroepbare functies.
+- **ReACT-agent**: `pipeline/orchard_agent.py::ask_orchard_advisor()` — altijd eerst een
+  kennisbank-zoekopdracht met de vraag zelf, dan een lus (max. 3 stappen) waarin Qwen een tool mag
+  aanroepen vóór het einantwoord. Gebruikt Qwen3's **eigen** `<think>`-redenering (`enable_thinking=True`)
+  i.p.v. een handmatige CoT-prompt-truc — getoond in een inklapbare "Redenering (CoT)"-sectie.
+- **Bug gevonden en gefixt**: bij een te klein token-budget kon generatie worden afgekapt MIDDEN in het
+  `<think>`-blok, waardoor de ruwe, onafgemaakte redenering als "antwoord" dreigde te lekken —
+  opgevangen met detectie van een ongesloten `<think>`-tag + één automatische retry met een groter
+  budget.
+- **Duim-omhoog/omlaag + DPO-dataverzameling** (toegevoegd 2026-10-09): elk antwoord van de agent
+  krijgt 👍/👎-knoppen. Een klik slaat het (vraag, gegeven-antwoord, alternatief-label)-paar op als
+  een DPO-voorkeurspaar in `Data/Orchard/Orchard_Agents_Training/orchard_dpo_feedback.jsonl` — 👍
+  markeert het getoonde antwoord als `chosen`, 👎 markeert het als `rejected` (met het antwoord zelf
+  nog steeds zichtbaar, geen her-generatie nodig). Dit is een VERZAMELMECHANISME, geen trainingsstap
+  op zich — de daadwerkelijke DPO-trainingsronde (roadmapstap 7, [Deel E](#deel-e)) volgt pas als er
+  genoeg paren zijn. Zie [Deel F](#deel-f) #11 voor de open vraag hierover.
+- **Hallucinatie-indicator** (toegevoegd 2026-10-09): elk antwoord krijgt een rood/groen label
+  (`pipeline/orchard_agent.py`'s `grounding`-veld) — **groen** als het antwoord aantoonbaar
+  RAG-fragmenten en/of tool-resultaten uit DEZE beurt gebruikt (gemeten: zijn er bronnen/tool-calls
+  EN citeert de tekst van het antwoord daadwerkelijk naar "Bronnen:"/tool-namen), **rood** als het
+  antwoord geen enkele gebruikte bron/tool-call heeft maar wel een feitelijke bewering lijkt te doen.
+  Dit is EXPLICIET een heuristiek (zie [Deel F](#deel-f) #12) — geen garantie dat een "groen" antwoord
+  klopt, alleen dat het zich op iets aangeleverds baseert.
+
+<a id="sec-g7"></a>
+## G.7 Patroonherkenning: meerjaren-trends
+
+- `pipeline/orchard_patterns.py`: 10 zelfgedefinieerde probleemcategorieën (fruitvliegen, vruchtrot,
+  bacterieziekte/kanker, bladvlekkenziekte, bladvalziekte, hagelschot, spint, luis, rupsen,
+  bestuiving/bijen, bladvoeding), elk met een eigen, EXPLICIET-benoemd "belang voor de oogst"-gewicht
+  (geen literatuur-ranking — een eigen inschatting, zie de UI-uitleg op de pagina zelf).
+- Drie detectortypes: **seizoenstiming** (verschuift het eerste moment per jaar vroeger/later?),
+  **frequentie** (neemt het aantal behandelingen per jaar toe/af?), **dosering** (stijgt de
+  gemiddelde dosis per toepassing — mogelijk resistentiesignaal?) — elk gescoord op dezelfde 0-1
+  "belang"-schaal zodat ze onderling vergelijkbaar zijn, plus een altijd-getoonde teeltkalender
+  (maand-voor-maand heatmap, geen trend).
+- **Gevalideerd tegen echte data**: fruitvliegendruk en bacterieziekte nemen aantoonbaar toe over de
+  jaren, bestuiving piekt in april (bloeitijd), vruchtrot/fruitvliegen pieken in mei-juni (vlak
+  voor/tijdens oogst) — allemaal agronomisch plausibel. Opvallendste los gevonden patroon: de
+  dosering van Zink steeg van ~200 naar ~900 ml per toepassing.
+- UI: `app/pages/8_Patroonherkenning.py`, met drill-down naar de onderliggende logboekregels per
+  patroon.
+
+<a id="sec-g8"></a>
+## G.8 Seizoenswaarschuwingen en preventieve weer-naar-ziekte-signalen
+
+Twee aanvullende, los ontwikkelde detectielagen op dezelfde pagina:
+
+- **Seizoenswaarschuwingen** (`pipeline/orchard_season_watch.py`): vergelijkt het gekozen seizoen
+  TOT NU TOE met dezelfde kalenderperiode in voorgaande jaren — temperatuur, waterbalans
+  (neerslag − ET0, zowel een tekort- als een overschot-signaal), logboek-plaagdruk (cumulatief aantal
+  meldingen per categorie, vergeleken met hetzelfde punt in eerdere seizoenen), en bestuivingsweer
+  tijdens de bloei (vuistregel: bijen vliegen slecht onder 13°C/bij regen/bij harde wind >25 km/u).
+  Een altijd-getoonde, eerlijke placeholder (`soil_ph_status_note()`) legt uit dat bodem-pH/zuurgraad
+  nog NIET gesignaleerd kan worden (geen echte bodemdata-koppeling, zie [C.4](#sec-c4)).
+- **Preventieve weer-naar-ziekte-signalen** (`pipeline/orchard_disease_weather_links.py`) — dit is de
+  directe invulling van "relaties tussen weer, ziektes en middelen herkennen zodat we niet te laat
+  zijn": voor elke categorie wordt het weer in de dagen VÓÓR elke historische eerste-behandeling-per-
+  jaar opgehaald (vocht voor schimmel-/bacterieziekten, warmte voor insecten — een eigen, transparante
+  vuistregel, geen literatuur-gekalibreerd model) en vergeleken met het weer van de laatste 10 dagen.
+  Alleen als de actuele omstandigheden (a) minstens zo "erg" zijn als ELKE eerdere aanleiding ÉN (b)
+  binnen het seizoensvenster vallen waarin die categorie historisch ook echt voorkomt, wordt het
+  gemeld. (b) was een noodzakelijke bugfix: zonder seizoensgrens meldde het systeem aanvankelijk
+  "vruchtrot-risico" zelfs in oktober, wat agronomisch onzinnig is.
+  **Gevalideerd** tegen een echt historisch moment (de dag vóór een bekende vruchtrot-behandeling in
+  2025) — het signaleerde daar correct.
+- Beide lagen hergebruiken dezelfde `TARGET_CATEGORIES`/harvest-weight-registry uit
+  `orchard_patterns.py` — geen dubbele categorisering.
+
+<a id="sec-g9"></a>
+## G.9 Gebruik van Middelen
+
+- `pipeline/orchard_middelen.py`: een handmatig opgebouwde canonicalisatie-/categoriseringsregistry
+  die de ~120 schrijfwijzen/OCR-varianten van middelnamen in het logboek (bv. "Zinc"/"Zink",
+  "Roval"/"Rovral", "Epso microtop"/"Epso Microstop bitterzout") samenvoegt tot echte producten en
+  indeelt in: gewasbescherming (schimmel/bacterie, insect/mijt, onkruid), meststof/bladvoeding,
+  hulpstof, bestuiving (bijen/hommels — GEEN middel, maar wel in de `middel`-kolom beland), en
+  eerlijk "overig" waar de identiteit niet zeker genoeg was (27 van 1026 toepassingen, 2,6%).
+- Telt per week/maand/kwartaal/jaar op — ml en gram worden NOOIT bij elkaar opgeteld.
+- UI: `app/pages/9_Gebruik_van_Middelen.py`, met gestapelde grafieken per categorie en drill-down per
+  product naar de onderliggende logboekregels.
+
+<a id="sec-g10"></a>
+## G.10 Bibliotheek, Help en overige UI-afwerking
+
+- `app/pages/7_Bibliotheek.py`: lijst van en toegang tot de Track 1-kennisbank (download +
+  inline PDF-voorbeeld), gevoed door `manifest.json`. De historische logboeken/nieuwsbrieven staan
+  hier BEWUST niet (horen bij de Logboek-pagina als doorzoekbare data, niet als losse bestandenlijst).
+- Decimalen-precisie: overal waar weer-tabellen getoond worden, expliciete
+  `st.column_config.NumberColumn(format="%.1f")` (1 decimaal, ET0 2 decimalen) — `round()` in Python
+  alleen bleek niet genoeg om Streamlit's eigen dataframe-weergave te sturen.
+- "Vraag de Adviseur"-layout: de lange fase-waarschuwing staat nu ONDER de chatgeschiedenis, vlak
+  boven de invoerbalk, zodat de chat direct bovenaan begint (invoerbalk zelf is sowieso
+  altijd-onderaan-vast door Streamlit's eigen `st.chat_input()`-gedrag).
+- `app/pages/10_Help.py` (toegevoegd 2026-10-09): gebruikersgerichte documentatie — wat elke pagina
+  doet en hoe je 'm gebruikt, GEEN technische architectuur-uitleg (die staat in dit document).
+
+<a id="sec-g11"></a>
+## G.11 Test- en kwaliteitsstatus
+
+- **139 automatische tests** (`pytest tests`, groeiend met elke nieuwe feature) — uitsluitend op
+  synthetische/eigen testdata, nooit op de echte (gitignored) logboek-/instellingen-data.
+- Elke nieuwe/gewijzigde Streamlit-pagina krijgt een smoke-check via
+  `streamlit.testing.v1.AppTest` (laadt de pagina, controleert op exceptions) — niet als permanente
+  pytest-bestanden (zelfde conventie als dit project al hanteerde), maar als terugkerende
+  verificatie-stap vóór elke sync naar de pod.
+- Live/netwerk-afhankelijke functionaliteit (Open-Meteo, Qwen3-8B-generatie, RAG-modellen laden)
+  wordt NIET in de geautomatiseerde suite getest (geen flaky/netwerk-afhankelijke CI), maar wel
+  handmatig gevalideerd tegen de echte data/API's bij elke nieuwe feature (zie bijv. [G.8](#sec-g8)'s
+  validatie tegen een echt historisch moment).
+- Beide omgevingen (laptop + cloud-pod) draaien dezelfde testsuite vóór elke herstart van de publieke
+  service.
+
+<a id="sec-g12"></a>
+## G.12 Belangrijkste geleerde lessen / bugs opgelost
+
+Een eerlijke lijst van wat er mis ging en hoe het opgelost is — nuttig voor toekomstig werk aan dit of
+een volgend domein:
+
+- **`st.dataframe()`-decimalen**: Python-`round()` alleen stuurt de weergave niet; nodig is
+  `st.column_config.NumberColumn(format=...)` (of `.format()` op een pandas `Styler`).
+- **Open-Meteo Archive-API heeft nog geen data voor "vandaag" zelf** (pas vanaf gisteren) — ontdekt
+  toen `compute_disease_weather_early_warnings()` crashte met HTTP 400. Opgelost met
+  `pipeline.orchard_tools.latest_available_archive_date()`, overal consequent toegepast.
+  - Gerelateerde EUR-Lex-les: herhaalde snelle requests leidden tot `202 Accepted`/lege body —
+    waarschijnlijk rate-limiting, niet geforceerd ("don't brute-force a blocked approach").
+- **Z-score bij nul-variantie-baseline**: als elk voorgaand jaar exact dezelfde waarde had (bv.
+  "altijd precies 1x"), gaf een standaard z-score-berekening 0.0 terug bij een afwijkende huidige
+  waarde (division-by-zero-vangrail verborg het net de interessante gevallen) — opgelost met een
+  heuristische minimale spreiding (10% van het gemiddelde) als de echte spreiding nul is.
+- **Qwen3 `<think>`-afkapping**: bij te weinig `max_new_tokens` kon de redenering nooit worden
+  afgesloten, waardoor ruwe CoT-tekst als "antwoord" dreigde te lekken — opgevangen met
+  ongesloten-tag-detectie + automatische retry.
+- **WUR edepot.wur.nl blokkeert kale/HEAD-requests (403)** — vereist een GET met een realistische
+  browser-`User-Agent`-header (zelfde les als Auto Pilot's eigen "maritime.org heeft een
+  Referer-header nodig"-ontdekking: andere site, zelfde les — probeer realistische headers vóór je
+  concludeert dat iets "geblokkeerd" is).
+- **Nooit een door een taalmodel gesuggereerde bron-ID vertrouwen zonder de gedownloade inhoud te
+  verifiëren** — twee keer deze sessie bleek een plausibel-ogende suggestie (een WUR-edepot-ID, een
+  Farmers'-Bulletin-nummer) bij daadwerkelijke download een compleet ander document te zijn.
+- **PowerShell-naar-SSH-quoting**: complexe bash-commando's met `$VAR`/pipes/geneste quotes via
+  PowerShell→ssh→bash verliezen escaping. Oplossing: voor iets complexers dan een eenvoudig
+  commando, een lokaal tijdelijk `.py`/`.sh`-scriptje schrijven en via `scp` overzetten i.p.v. inline
+  te quoten.
+- **Streamlit's `st.chat_input()` is altijd onderaan vast** (viewport-gedrag), ongeacht waar in de
+  code het aangeroepen wordt — "de vraagbalk naar boven zetten" is daarom vertaald naar "alles wat
+  niet de chat zelf is, inclusief de lange waarschuwing, naar onderen verplaatsen".
+
+<a id="sec-g13"></a>
+## G.13 Git/GitHub en synchronisatie
+
+- Repo aangemaakt op `https://github.com/TextMiningUM/Orchard` (zelfde account/org als Auto Pilot,
+  credentials al aanwezig via Windows Credential Manager).
+- **`.gitignore`-ontwerpkeuze (bewust, met de gebruiker afgestemd)**: de eigen logboek-bedrijfsgegevens
+  (`Data/Data Log Books/`, `orchard_logbook.db` + transcripten + scans, `orchard_settings.json` met
+  het echte adres) blijven **lokaal-only** — dit is echte, herleidbare bedrijfsinformatie van één
+  specifieke teler (welke middelen, wanneer, hoeveel) die niet ongevraagd naar een (mogelijk publieke)
+  git-repo hoort, ook al is dat technisch dezelfde org als Auto Pilot. Ook `Images/` (vermoedelijk
+  gescrapete stockfoto) en `Docs/` (privé-briefingdocumenten) blijven lokaal, zelfde conventie als
+  Auto Pilot's eigen `Docs/`-behandeling. De Track 1-kennisbank (overheids-/universiteitsbronnen) WEL
+  getrackt, zelfde precedent als Auto Pilot's eigen corpus-bestanden.
+- `.github/copilot-instructions.md` en `README.md` geschreven (stonden al open van een eerder verzoek)
+  — documenteren de AgentPaths-conventie, de lokaal-vs-cloud-split, en alle hierboven genoemde
+  geleerde lessen, zodat een toekomstige sessie (mens of agent) niet opnieuw tegen dezelfde muren
+  aanloopt.
+- **Sync-werkwijze naar de pod**: de pod heeft geen git-checkout (geen `git` push/pull-workflow
+  opgezet) — wijzigingen worden per batch als `tar.gz` gepackaged, ge-`scp`'t, en op de pod uitgepakt,
+  gevolgd door `pytest` + een systemd-service-herstart + een curl-verificatie van zowel de
+  lokale als de publieke URL. Dit is bewust lichtgewicht gehouden i.p.v. een CI/CD-pipeline op te
+  zetten, gezien de schaal van dit project.
