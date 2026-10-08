@@ -5,7 +5,7 @@ manually -- see the session's own verification transcript, not re-run on every `
 """
 from __future__ import annotations
 
-from pipeline.orchard_tools import _degrees_to_compass
+from pipeline.orchard_tools import _degrees_to_compass, latest_available_archive_date
 
 
 def test_degrees_to_compass_cardinal_points():
@@ -18,6 +18,11 @@ def test_degrees_to_compass_cardinal_points():
 def test_degrees_to_compass_wraps_around_360():
     assert _degrees_to_compass(359) == "N"
     assert _degrees_to_compass(360) == "N"
+
+
+def test_latest_available_archive_date_is_yesterday():
+    from datetime import date, timedelta
+    assert latest_available_archive_date() == date.today() - timedelta(days=1)
 
 
 def test_degrees_to_compass_none_passthrough():

@@ -13,6 +13,8 @@ dependency for its core weather tools -- ``requests`` is NOT required to run the
 """
 from __future__ import annotations
 
+from datetime import date as _date_cls, timedelta as _timedelta_cls
+
 import json
 import urllib.parse
 import urllib.request
@@ -141,22 +143,25 @@ def _degrees_to_compass(deg: float | None) -> str | None:
     return _COMPASS_POINTS[idx]
 
 
-def get_weather_window(
-    lat: float, lon: float, center_date: str, days_before: int = 7, days_after: int = 7,
-) -> tuple[list[DetailedDailyReading], str]:
-    """Haalt een gedetailleerd dagelijks weerbeeld op rond ``center_date`` (ISO
-    "YYYY-MM-DD"), standaard een week ervoor en een week erna -- bedoeld voor de
-    Logboek-Verifieren-popup, zodat een logboek-ingreep in zijn volledige weerscontext
-    bekeken kan worden (niet alleen de ene dag zelf). Gebruikt dezelfde Open-Meteo
-    Historical Weather API als ``get_weather_history()``, met extra dagwaarden: wind
-    (snelheid + dominante richting), zonuren, en ET0-referentieverdamping."""
-    from datetime import date as _date, timedelta as _timedelta
-    center = _date.fromisoformat(center_date)
-    start = center - _timedelta(days=days_before)
-    end = center + _timedelta(days=days_after)
+def latest_available_archive_date() -> _date_cls:
+    """Open-Meteo's Historical/Archive API has NO data yet for "today" itself (confirmed
+    2026-10-09: requesting end_date=today returns HTTP 400, yesterday already works fine) --
+    callers that build an end-date from ``date.today()`` for the archive endpoint must clamp
+    to this instead, or risk a crash the one day a year someone runs it at the season's very
+    start. Centralised here so every "current season so far" caller (``orchard_season_watch``,
+    ``orchard_disease_weather_links``) applies the exact same clamp."""
+    return _date_cls.today() - _timedelta_cls(days=1)
+
+
+def get_weather_history_detailed(lat: float, lon: float, start_date: str, end_date: str) -> tuple[list[DetailedDailyReading], str]:
+    """Haalt een gedetailleerd dagelijks weerbeeld op voor een expliciete periode (ISO
+    "YYYY-MM-DD".."YYYY-MM-DD") -- wind (snelheid + dominante richting), zonuren, en
+    ET0-referentieverdamping, bovenop de kale temperatuur/neerslag uit
+    ``get_weather_history()``. Gedeelde basis voor ``get_weather_window()`` (venster rond
+    één datum) en ``pipeline.orchard_season_watch`` (lang seizoensbereik)."""
     params = {
         "latitude": lat, "longitude": lon,
-        "start_date": start.isoformat(), "end_date": end.isoformat(),
+        "start_date": start_date, "end_date": end_date,
         "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,"
                  "windspeed_10m_max,winddirection_10m_dominant,sunshine_duration,"
                  "et0_fao_evapotranspiration",
@@ -181,6 +186,26 @@ def get_weather_window(
             sunshine_duration_h=(sunshine_s / 3600.0) if sunshine_s is not None else None,
             et0_evapotranspiration_mm=(d.get("et0_fao_evapotranspiration") or [None] * len(times))[i],
         ))
+    citation = (
+        f"Open-Meteo Historical Weather API ({_OPEN_METEO_ARCHIVE_URL}), periode {start_date}..{end_date}"
+    )
+    return rows, citation
+
+
+def get_weather_window(
+    lat: float, lon: float, center_date: str, days_before: int = 7, days_after: int = 7,
+) -> tuple[list[DetailedDailyReading], str]:
+    """Haalt een gedetailleerd dagelijks weerbeeld op rond ``center_date`` (ISO
+    "YYYY-MM-DD"), standaard een week ervoor en een week erna -- bedoeld voor de
+    Logboek-Verifieren-popup, zodat een logboek-ingreep in zijn volledige weerscontext
+    bekeken kan worden (niet alleen de ene dag zelf). Gebruikt dezelfde Open-Meteo
+    Historical Weather API als ``get_weather_history()``, met extra dagwaarden: wind
+    (snelheid + dominante richting), zonuren, en ET0-referentieverdamping."""
+    from datetime import date as _date, timedelta as _timedelta
+    center = _date.fromisoformat(center_date)
+    start = center - _timedelta(days=days_before)
+    end = center + _timedelta(days=days_after)
+    rows, _citation = get_weather_history_detailed(lat, lon, start.isoformat(), end.isoformat())
     citation = (
         f"Open-Meteo Historical Weather API ({_OPEN_METEO_ARCHIVE_URL}), "
         f"venster {start.isoformat()}..{end.isoformat()} rond {center_date}"

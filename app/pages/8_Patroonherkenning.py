@@ -19,15 +19,25 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from pipeline.orchard_patterns import Pattern, TARGET_CATEGORIES, detect_patterns  # noqa: E402
+from pipeline.orchard_patterns import LogEntry, Pattern, TARGET_CATEGORIES, detect_patterns, load_entries  # noqa: E402
+from pipeline.orchard_disease_weather_links import compute_disease_weather_early_warnings  # noqa: E402
+from pipeline.orchard_season_watch import (  # noqa: E402
+    SeasonSignal,
+    compute_pollination_season_watch,
+    compute_weather_season_watch,
+    detect_logbook_season_spikes,
+    soil_ph_status_note,
+)
 
 st.set_page_config(page_title="Patroonherkenning", layout="wide")
 st.title("Patroonherkenning")
 st.caption(
     "Het systeem doorzoekt zelf de 14 jaar logboeken op de meest in het oog springende, "
-    "oogst-relevante patronen (seizoenstiming, behandelfrequentie, dosering) en toont "
-    "daaronder altijd een empirische teeltkalender. Klik een patroon open om de "
-    "onderliggende logboek-regels te bekijken."
+    "oogst-relevante patronen: meerjaren-trends (seizoenstiming, behandelfrequentie, "
+    "dosering) EN seizoenswaarschuwingen (wijkt het lopende/meest recente seizoen tot nu "
+    "toe af van voorgaande jaren -- te warm, te droog/nat, een plaagexplosie, slecht "
+    "bestuivingsweer?). Klik een patroon of waarschuwing open om de onderliggende "
+    "logboek-regels te bekijken."
 )
 
 ctx = render_sidebar(st)
@@ -121,9 +131,99 @@ KIND_LABELS = {
     "dosering": "Doseringstrend",
 }
 
+SEVERITY_ORDER = {"hoog": 2, "matig": 1, "info": 0}
+SEVERITY_ICON = {"hoog": "🔴", "matig": "🟠", "info": "ℹ️"}
+
+
+@st.cache_data(show_spinner=False)
+def _cached_load_entries(db_path: str, mtime: float) -> list[LogEntry]:
+    conn = sqlite3.connect(db_path)
+    try:
+        return load_entries(conn)
+    finally:
+        conn.close()
+
+
+@st.cache_data(show_spinner="Dit seizoen vergelijken met voorgaande jaren (weer)...", ttl="6h")
+def _cached_weather_season_watch(lat: float, lon: float, target_year: int):
+    return compute_weather_season_watch(lat, lon, target_year)
+
+
+@st.cache_data(show_spinner="Bestuivingsweer tijdens de bloei controleren...", ttl="6h")
+def _cached_pollination_season_watch(lat: float, lon: float, _entries: list[LogEntry], target_year: int):
+    return compute_pollination_season_watch(lat, lon, _entries, target_year)
+
+
+@st.cache_data(show_spinner="Weer van de laatste dagen vergelijken met eerdere uitbraken...", ttl="6h")
+def _cached_disease_weather_early_warnings(lat: float, lon: float, _entries: list[LogEntry]):
+    return compute_disease_weather_early_warnings(lat, lon, _entries)
+
+
+def _render_signal_card(signal: SeasonSignal) -> None:
+    with st.container(border=True):
+        st.markdown(f"{SEVERITY_ICON.get(signal.severity, '')} **{signal.title}**")
+        st.write(signal.summary)
+        if signal.source_citation:
+            st.caption(f"Bron: {signal.source_citation}")
+        if signal.entry_ids:
+            with st.expander(f"Onderliggende logboek-regels bekijken ({len(signal.entry_ids)})"):
+                st.dataframe(_fetch_entry_rows(signal.entry_ids), width="stretch", hide_index=True)
+
+
+all_entries = _cached_load_entries(str(DB_PATH), DB_PATH.stat().st_mtime)
+
+st.subheader("Seizoenswaarschuwingen (dit seizoen vs. voorgaande jaren)")
+jaren_met_data = sorted({e.date.year for e in all_entries if e.date is not None})
+default_jaar = next(
+    (j for j in reversed(jaren_met_data) if sum(1 for e in all_entries if e.date and e.date.year == j) >= 5),
+    jaren_met_data[-1] if jaren_met_data else None,
+)
+if default_jaar is None:
+    st.info("Geen gedateerde logboekregels gevonden om een seizoen mee te vergelijken.")
+else:
+    gekozen_jaar = st.selectbox(
+        "Seizoen om te controleren", jaren_met_data, index=jaren_met_data.index(default_jaar),
+        help="Standaard het meest recente jaar met voldoende logboekregels. Oudere jaren worden "
+             "vergeleken alsof het hele seizoen (tot 1 november) al voorbij is.",
+    )
+    weer_signalen = _cached_weather_season_watch(ctx.lat, ctx.lon, gekozen_jaar)
+    logboek_signalen = detect_logbook_season_spikes(all_entries, target_year=gekozen_jaar)
+    bestuiving_signaal = _cached_pollination_season_watch(ctx.lat, ctx.lon, all_entries, gekozen_jaar)
+
+    signalen = list(weer_signalen) + list(logboek_signalen)
+    if bestuiving_signaal is not None:
+        signalen.append(bestuiving_signaal)
+    signalen.sort(key=lambda s: SEVERITY_ORDER.get(s.severity, 0), reverse=True)
+
+    if not signalen:
+        st.success(f"Geen afwijkende seizoenssignalen gevonden voor {gekozen_jaar} t.o.v. voorgaande jaren.")
+    else:
+        for s in signalen:
+            _render_signal_card(s)
+    _render_signal_card(soil_ph_status_note())
+
+st.divider()
+st.subheader("Preventieve risico-waarschuwingen (weer van de laatste dagen vs. wat vroeger een uitbraak voorafging)")
+st.caption(
+    "Anders dan hierboven (is dit seizoen anders dan normaal?) kijkt dit naar een directe "
+    "relatie: voor elke categorie wordt het weer in de dagen vóór elke eerdere behandeling "
+    "opgezocht, en vergeleken met het weer van de laatste 10 dagen nu. Alleen als de "
+    "omstandigheden zowel qua weer ALS qua tijd-van-het-jaar overeenkomen met eerdere "
+    "aanleidingen, wordt dit gemeld -- bedoeld om er eerder bij te zijn dan de eerste "
+    "symptomen (zie `pipeline/orchard_disease_weather_links.py` voor de volledige methode "
+    "en de beperkingen daarvan bij deze hoeveelheid data)."
+)
+preventieve_signalen = _cached_disease_weather_early_warnings(ctx.lat, ctx.lon, all_entries)
+if not preventieve_signalen:
+    st.success("Geen enkele categorie heeft nu weer dat lijkt op een eerdere aanleiding tot behandelen.")
+else:
+    for s in preventieve_signalen:
+        _render_signal_card(s)
+
+st.divider()
 ranked_patterns, calendar_pattern = _cached_detect_patterns(str(DB_PATH), DB_PATH.stat().st_mtime, 8)
 
-st.subheader("Automatisch gedetecteerde patronen (gerangschikt op belang voor de oogst)")
+st.subheader("Automatisch gedetecteerde meerjaren-patronen (gerangschikt op belang voor de oogst)")
 if not ranked_patterns:
     st.info(
         "Nog geen trendpatroon gevonden met voldoende jaren data "
