@@ -16,6 +16,11 @@ een HEURISTIEK, zie design doc Deel F #12, geen garantie) en duim-omhoog/omlaag-
 een voorkeurssignaal opslaan voor een toekomstige DPO-trainingsronde
 (`pipeline/orchard_feedback.py`, zie Deel E stap 7/Deel F #11). Zie ontwerp Deel E voor de
 trainingsroadmap.
+
+Chats worden -- net als bij ChatGPT -- bewaard per sessie (`pipeline/orchard_chats.py`, een
+JSON-bestand per chat in `Data/Orchard/OrchardChats/`). De pagina opent altijd met een
+nieuwe, lege chat; eerdere chats staan in de zijbalk (automatisch getitelde knop) en kunnen
+met een klik hervat worden, inclusief volledige vraag/antwoord-geschiedenis en voorkeuren.
 """
 from __future__ import annotations
 
@@ -27,11 +32,22 @@ from orchard_common import compute_season_snapshot, render_sidebar  # noqa: E402
 
 import streamlit as st
 
-from pipeline.orchard_agent import ask_orchard_advisor  # noqa: E402
+from pipeline.orchard_agent import ask_orchard_advisor, build_history_messages  # noqa: E402
+from pipeline.orchard_chats import (  # noqa: E402
+    ChatSession,
+    ChatTurn,
+    delete_chat,
+    derive_title,
+    list_chats,
+    load_chat,
+    new_chat_session,
+    save_chat,
+)
 from pipeline.orchard_feedback import build_feedback_record, save_feedback  # noqa: E402
 from pipeline.orchard_rag import load_index  # noqa: E402
 from pipeline.orchard_tools import check_ctgb_toelating, get_rain_nowcast  # noqa: E402
 from pipeline.qwen_remote import is_remote_server_up, reconnect_tunnel  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
 
 st.set_page_config(page_title="Vraag de Adviseur", layout="wide")
 st.title("Vraag de Adviseur")
@@ -48,8 +64,61 @@ with st.sidebar:
             "(zie `pipeline/qwen_remote.py`) of vul `.env` (ORCHARD_CLOUD_SSH_HOST/KEY) in."
         )
 
+
+def _new_session_state(session) -> None:
+    st.session_state["current_chat_id"] = session.id
+    st.session_state["current_chat_title"] = session.title
+    st.session_state["current_chat_created_at"] = session.created_at
+    st.session_state["chat_history"] = [(t.role, t.content, t.meta) for t in session.turns]
+
+
 if "chat_history" not in st.session_state:
-    st.session_state["chat_history"] = []
+    # Zelfde gewoonte als ChatGPT: de pagina opent altijd op een VERSE, lege chat -- eerdere
+    # chats staan in de zijbalk en moeten expliciet aangeklikt worden om te hervatten.
+    _new_session_state(new_chat_session())
+
+
+def _save_current_chat() -> None:
+    history = st.session_state["chat_history"]
+    if not history:
+        return  # nog niets om te bewaren
+    if st.session_state["current_chat_title"] == "Nieuwe chat":
+        first_question = next((m for r, m, _ in history if r == "user"), "")
+        if first_question:
+            st.session_state["current_chat_title"] = derive_title(first_question)
+    session = ChatSession(
+        id=st.session_state["current_chat_id"], title=st.session_state["current_chat_title"],
+        created_at=st.session_state["current_chat_created_at"],
+        updated_at=datetime.now(timezone.utc).isoformat(),
+        turns=[ChatTurn(role=r, content=m, meta=meta) for r, m, meta in history],
+    )
+    save_chat(session)
+
+
+with st.sidebar:
+    st.divider()
+    st.subheader("Chats")
+    if st.button("Nieuwe chat", width="stretch"):
+        _save_current_chat()
+        _new_session_state(new_chat_session())
+        st.rerun()
+    for chat_meta in list_chats():
+        is_current = chat_meta["id"] == st.session_state["current_chat_id"]
+        col_a, col_b = st.columns([4, 1])
+        if col_a.button(
+            chat_meta["title"] or "Chat", key=f"open_{chat_meta['id']}", width="stretch",
+            type="primary" if is_current else "secondary",
+        ):
+            _save_current_chat()
+            resumed = load_chat(chat_meta["id"])
+            if resumed is not None:
+                _new_session_state(resumed)
+                st.rerun()
+        if col_b.button("Verwijder", key=f"del_{chat_meta['id']}"):
+            delete_chat(chat_meta["id"])
+            if is_current:
+                _new_session_state(new_chat_session())
+            st.rerun()
 
 _rag_index = load_index()
 with st.sidebar:
@@ -63,8 +132,13 @@ with st.sidebar:
 
 
 def _ask_advisor(question: str, snapshot: dict | None) -> dict:
+    # Eerdere beurten (exclusief de net toegevoegde user-prompt van nu) als gespreksgeschiedenis,
+    # zodat vervolgvragen ("en hoe zit dat met...?") met echte context beantwoord worden i.p.v.
+    # als een volledig losse, nieuwe vraag behandeld te worden.
+    prior_turns = [(role, msg) for role, msg, _meta in st.session_state["chat_history"][:-1]]
+    history = build_history_messages(prior_turns)
     try:
-        resp = ask_orchard_advisor(question, ctx, snapshot=snapshot, rag_index=_rag_index)
+        resp = ask_orchard_advisor(question, ctx, snapshot=snapshot, rag_index=_rag_index, history=history)
     except (ConnectionError, RuntimeError) as exc:
         return {
             "answer": f"Kon het Qwen3-8B-model niet bereiken: {exc}",
@@ -189,6 +263,7 @@ def _render_assistant_message(answer: str, meta: dict, key_prefix: str) -> None:
         )
         save_feedback(record)
         meta["feedback"] = preference
+        _save_current_chat()
 
     col1.button("Nuttig", key=f"{key_prefix}_up", on_click=_give_feedback, args=("chosen",))
     col2.button("Niet nuttig", key=f"{key_prefix}_down", on_click=_give_feedback, args=("rejected",))
@@ -215,9 +290,15 @@ if prompt := st.chat_input("Stel een vraag, bijv. 'is er vorstrisico deze week?'
     st.session_state["chat_history"].append(("user", prompt, {}))
     with st.chat_message("user"):
         st.markdown(prompt)
-    result = _route_question(prompt)
-    result["question"] = prompt
-    result["feedback"] = None
-    st.session_state["chat_history"].append(("assistant", result["answer"], result))
     with st.chat_message("assistant"):
+        with st.spinner(
+            "De adviseur denkt na... (bij een vraag die niet direct door een tool wordt "
+            "beantwoord, raadpleegt het AI-model eerst de kennisbank en kan het 30-60 "
+            "seconden duren)"
+        ):
+            result = _route_question(prompt)
+        result["question"] = prompt
+        result["feedback"] = None
+        st.session_state["chat_history"].append(("assistant", result["answer"], result))
+        _save_current_chat()
         _render_assistant_message(result["answer"], result, key_prefix=f"new_{len(st.session_state['chat_history'])}")

@@ -83,6 +83,7 @@ Bronnen voor dit ontwerp:
   - [G.11 Test- en kwaliteitsstatus](#sec-g11)
   - [G.12 Belangrijkste geleerde lessen / bugs opgelost](#sec-g12)
   - [G.13 Git/GitHub en synchronisatie](#sec-g13)
+  - [G.14 Chat-UX: feedback/grounding, gespreksgeheugen en bewaarde chats](#sec-g14)
 
 ---
 
@@ -1163,3 +1164,57 @@ een volgend domein:
   gevolgd door `pytest` + een systemd-service-herstart + een curl-verificatie van zowel de
   lokale als de publieke URL. Dit is bewust lichtgewicht gehouden i.p.v. een CI/CD-pipeline op te
   zetten, gezien de schaal van dit project.
+
+<a id="sec-g14"></a>
+## G.14 Chat-UX: feedback/grounding, gespreksgeheugen en bewaarde chats
+
+Na de bovenstaande herschrijving van dit document zijn op "Vraag de Adviseur" nog vier met elkaar
+samenhangende features toegevoegd, allemaal in `app/pages/2_Vraag_de_Adviseur.py` +
+nieuwe/uitgebreide pipeline-modules:
+
+- **DPO-feedback (duim omhoog/omlaag)** — `pipeline/orchard_feedback.py`: elk antwoord krijgt een
+  "Nuttig"/"Niet nuttig"-knop (bewust tekst, geen emoji — zie hieronder). Een klik slaat een
+  `FeedbackRecord` op als regel in `Data/Orchard/Orchard_Agents_Training/orchard_dpo_feedback.jsonl`
+  (vraag, antwoord, voorkeur, timestamp, gebruikte bronnen/tools). Dit is **één kant** van een
+  toekomstig DPO-voorkeurspaar (chosen óf rejected) — een los dataset-bouw-script moet records met
+  vergelijkbare vragen later samenvoegen tot echte paren; dat script bestaat nog niet (zie
+  [Deel F](#deel-f) #11).
+- **Hallucinatie-/grounding-indicator** — `pipeline.orchard_agent.assess_grounding()`: een HEURISTIEK
+  (geen garantie) die een antwoord als "gegrond" bestempelt als zowel (a) er tool-output en/of
+  kennisbank-bronnen beschikbaar waren ALS (b) de antwoordtekst daar ook daadwerkelijk naar verwijst.
+  UI toont dit als `st.success`/`st.error` met tekstlabel "GEGROND" / "GEEN GROUNDING GEVONDEN" (ook
+  hier bewust geen rood/groen-emoji of iconen, zie [Deel F](#deel-f) #12 voor de beperkingen van deze
+  heuristiek).
+- **Gespreksgeheugen over meerdere beurten** — `ask_orchard_advisor()` accepteert nu `history` +
+  `max_history_turns`; `build_history_messages()` (pure helper) zet eerdere beurten uit
+  `st.session_state["chat_history"]` om in chat-berichten vóór de huidige vraag, en strip daarbij het
+  UI-only-disclaimer-voetnotje van eerdere assistent-antwoorden (anders zou het model dat opnieuw
+  gaan citeren). Hierdoor werken vervolgvragen ("en is dat erg voor kersen?") correct met de context
+  van het voorgaande antwoord — handmatig gevalideerd met een echte suzuki-fruitvlieg-vervolgvraag.
+- **Bewaarde/hervatbare chats (ChatGPT-stijl)** — `pipeline/orchard_chats.py`: één JSON-bestand per
+  chatsessie (`ChatSession`/`ChatTurn`-dataclasses) in `Data/Orchard/OrchardChats/` (GITIGNORED,
+  zelfde reden als de logboekdata — kan echte vragen over de eigen boomgaard bevatten). De pagina
+  opent ALTIJD op een verse, lege chat (bewuste keuze, zelfde gedrag als ChatGPT — geen automatisch
+  hervatten van de laatste chat); eerdere chats staan als knop in de zijbalk met een automatisch
+  afgeleide titel (`derive_title()`: eerste vraag ingekort/opgeschoond, val terug op "Nieuwe chat" als
+  er nog geen vraag was) en kunnen met een klik hervat worden (volledige vraag/antwoord-geschiedenis
+  + feedback-status wordt teruggezet) of verwijderd. Elke nieuwe beurt en elke feedback-klik roept
+  `_save_current_chat()` aan, dus een chat staat altijd actueel op schijf, ook als de gebruiker
+  tussentijds wegnavigeert.
+- **"De adviseur denkt na"-spinner** — een volledige chat-beurt duurt op de pod ~30-35s (RAG-index
+  laden + Qwen3-8B-generatie); zonder enige visuele terugkoppeling leek dit "kapot". Een
+  `st.spinner("De adviseur denkt na...")` rond de hele routeringsaanroep lost dit op.
+
+Twee bugs kwamen bij het bouwen van bovenstaande aan het licht (zie ook [G.12](#sec-g12)):
+
+- **"Maar één vraag werkt, dan niets meer"** bleek het inmiddels bekende stale-module-cache-probleem
+  (zie [G.12](#sec-g12)) opnieuw — ditmaal `AttributeError: 'AdvisorResponse' object has no attribute
+  'grounding'` omdat de lang-lopende lokale `streamlit run`-server het nieuwe dataclass-veld niet had
+  opgepikt. Opgelost door het proces volledig te stoppen en opnieuw te starten (niet door code te
+  wijzigen) — dit is nu de tweede keer dat dit exacte symptoom zich voordeed, dus eerste
+  verdenking bij toekomstige "werkte net nog, nu ineens een AttributeError/ImportError"-meldingen.
+- **Emoji sloop zich er opnieuw in** (rood/groen bolletjes, duim-emoji) tijdens het bouwen van
+  bovenstaande features — opnieuw gesaneerd met dezelfde regex als eerder
+  (`[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]`), met tekstlabels als vervanging. Dit project heeft dus
+  een terugkerende "geen emoji in de UI"-afspraak die bij élke nieuwe feature opnieuw gecontroleerd
+  moet worden, niet een eenmalige opschoning.

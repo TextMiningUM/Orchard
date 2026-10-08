@@ -62,6 +62,18 @@ rekentools mag raadplegen voor een onderbouwd antwoord.
   gebruikt om het model in een latere ronde te verbeteren. Na een klik verschijnt een bevestiging; je
   kunt daarna niet meer wisselen van keuze voor dat antwoord.
 
+Een antwoord duurt soms een halve minuut — zolang de melding *"De adviseur denkt na..."* zichtbaar is,
+is het systeem bezig; even geduld dus.
+
+Je kunt ook **vervolgvragen** stellen (bijvoorbeeld eerst *"wat is suzuki-fruitvlieg?"* en dan *"en
+is dat erg voor kersen?"*) — het model houdt rekening met wat je eerder in dezelfde chat hebt
+gevraagd en geantwoord gekregen.
+
+**Chats bewaren en teruglezen:** elke keer dat je de pagina opent, begin je met een nieuwe, lege
+chat. In de zijbalk onder "Chats" staan je eerdere chats (automatisch een titel gekregen op basis van
+je eerste vraag) — klik erop om die chat weer te openen en verder te gaan waar je gebleven was, of
+klik op "Verwijder" om 'm weg te gooien. Klik op "Nieuwe chat" om met een schone lei te beginnen.
+
 Het model is nog **niet** getraind op deze boomgaard specifiek — het is nog het kale basismodel, al
 mét toegang tot de kennisbank en de rekentools. Controleer specifieke feiten dus altijd tegen de
 genoemde bron.

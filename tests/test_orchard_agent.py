@@ -3,7 +3,13 @@ Qwen3-8B call in the automated suite; end-to-end ReACT behaviour is smoke-tested
 against the real cloud inference server, see pipeline/orchard_agent.py's own docstring)."""
 from __future__ import annotations
 
-from pipeline.orchard_agent import _dedup, _extract_tool_call, _strip_think, assess_grounding
+from pipeline.orchard_agent import (
+    _dedup,
+    _extract_tool_call,
+    _strip_think,
+    assess_grounding,
+    build_history_messages,
+)
 
 
 def test_strip_think_extracts_reasoning_block():
@@ -81,3 +87,32 @@ def test_assess_grounding_red_when_sources_available_but_not_cited_in_text():
 def test_assess_grounding_case_insensitive_bron_match():
     answer = "Zie BRON: iets"
     assert assess_grounding(answer, ["iets"], []) == "green"
+
+
+# ── build_history_messages ───────────────────────────────────────────────────────────────────
+def test_build_history_messages_preserves_order_and_roles():
+    turns = [("user", "Is er vorstrisico?"), ("assistant", "Nee, geen risico.")]
+    messages = build_history_messages(turns)
+    assert messages == [
+        {"role": "user", "content": "Is er vorstrisico?"},
+        {"role": "assistant", "content": "Nee, geen risico."},
+    ]
+
+
+def test_build_history_messages_strips_disclaimer_from_assistant_turns():
+    answer = (
+        "Het antwoord is X.\n\n**Bronnen:**\n- WUR-publicatie\n\n"
+        "*Let op: dit antwoord komt van het ongetrainde Qwen3-8B-basismodel ...*"
+    )
+    messages = build_history_messages([("assistant", answer)])
+    assert messages[0]["content"] == "Het antwoord is X.\n\n**Bronnen:**\n- WUR-publicatie"
+    assert "Let op" not in messages[0]["content"]
+
+
+def test_build_history_messages_leaves_user_turns_untouched():
+    messages = build_history_messages([("user", "Een vraag met *Let op: iets* erin.")])
+    assert messages[0]["content"] == "Een vraag met *Let op: iets* erin."
+
+
+def test_build_history_messages_empty_list():
+    assert build_history_messages([]) == []

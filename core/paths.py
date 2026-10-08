@@ -116,6 +116,12 @@ class AgentPaths:
         return self.data_root / f"{self.domain}_Agents_Training"
 
     @property
+    def chats_dir(self) -> Path:
+        """Saved chat sessions (one JSON file per chat) -- "Vraag de Adviseur"'s ChatGPT-style
+        chat history, gitignored (may contain real questions about the teler's own orchard)."""
+        return self.data_root / f"{self.domain}Chats"
+
+    @property
     def gold_file(self) -> Path:
         """Committed hand-authored gold Q&A file (in eval_dir)."""
         return self.eval_dir / f"{self.domain.lower()}_gold_qa.json"
@@ -158,6 +164,7 @@ class AgentPaths:
             self.eval_dir,
             self.json_dir,
             self.cache_dir,
+            self.chats_dir,
             self.models_root,
             self.hf_cache_dir,
             self.domain_models_dir,

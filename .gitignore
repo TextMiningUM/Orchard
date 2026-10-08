@@ -44,6 +44,10 @@ Data/Orchard/OrchardLogbooks/_raw_page_images/
 # app/orchard_common.py's load_settings()/save_settings().
 Data/Orchard/orchard_settings.json
 
+# Saved chat sessions ("Vraag de Adviseur") -- may contain real questions/context about the
+# teler's own orchard, same local-only treatment as the logbook data above.
+Data/Orchard/OrchardChats/
+
 # Possibly-copyrighted stock photo (filename pattern suggests a scraped/WordPress-hosted
 # image, not an original asset) -- exclude until ownership/licence is confirmed.
 Images/

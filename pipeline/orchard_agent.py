@@ -103,6 +103,21 @@ def _dedup(items: list[str]) -> list[str]:
     return out
 
 
+def build_history_messages(turns: list[tuple[str, str]]) -> list[dict]:
+    """Pure: converts a flat ``[(role, text), ...]`` conversation log (oldest first, e.g. the
+    Streamlit page's own chat history) into the ``[{"role": ..., "content": ...}, ...]`` shape
+    `ask_orchard_advisor()`'s `history` argument expects. Strips the UI-only disclaimer note
+    (the italic "*Let op: ...*" line the chat page appends to every LLM answer, see
+    `app/pages/2_Vraag_de_Adviseur.py`) from assistant turns before re-feeding them back to the
+    model -- no point spending tokens on the model re-reading its own boilerplate warning."""
+    messages = []
+    for role, text in turns:
+        if role == "assistant":
+            text = re.split(r"\n\n\*Let op:", text)[0].strip()
+        messages.append({"role": role, "content": text})
+    return messages
+
+
 def assess_grounding(answer: str, sources: list[str], tool_calls: list[str]) -> str:
     """Returns "green" or "red" -- a HEURISTIC indicator of whether `answer` appears to
     actually use the sources/tool results that were available, rather than ignoring them and
@@ -125,11 +140,19 @@ def assess_grounding(answer: str, sources: list[str], tool_calls: list[str]) -> 
 def ask_orchard_advisor(
     question: str, ctx, snapshot: dict | None = None, rag_index: RagIndex | None = None,
     max_tool_hops: int = 3, max_new_tokens: int = 700,
+    history: list[dict] | None = None, max_history_turns: int = 4,
 ) -> AdvisorResponse:
     """Builds the prompt, runs the (optional) ReACT tool-call loop, and returns a grounded
     answer. Never raises on a reachable-but-confused model reply -- worst case, the raw model
     text is returned as the answer with an empty source list, same "always return something
-    usable" posture as the rest of this project's LLM call sites."""
+    usable" posture as the rest of this project's LLM call sites.
+
+    `history` (new, 2026-10-09): prior turns of the SAME conversation, as
+    ``[{"role": "user"|"assistant", "content": ...}, ...]`` oldest-first -- lets the model
+    answer follow-up questions ("en hoe zit dat met ...?") with real context instead of
+    treating every question as a fresh, isolated one. Capped to the last
+    `max_history_turns` EXCHANGES (so `2 * max_history_turns` messages) to keep the prompt
+    within the server's token budget -- older turns are silently dropped, newest first."""
     from pipeline.orchard_rag import format_context, format_sources, retrieve
 
     sources: list[str] = []
@@ -149,7 +172,9 @@ def ask_orchard_advisor(
         f"Relevante kennisbank-fragmenten:\n{context_block}\n\n"
         f"{tool_instr}"
     )
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_msg}]
+    capped_history = (history or [])[-(2 * max_history_turns):]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}, *capped_history,
+                {"role": "user", "content": user_msg}]
 
     reasoning_parts: list[str] = []
     tool_calls_made: list[str] = []
