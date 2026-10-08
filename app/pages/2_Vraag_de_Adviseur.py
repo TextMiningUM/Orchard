@@ -30,14 +30,6 @@ from pipeline.qwen_remote import is_remote_server_up, reconnect_tunnel  # noqa: 
 
 st.set_page_config(page_title="Vraag de Adviseur", layout="wide")
 st.title("Vraag de Adviseur")
-st.warning(
-    "**Fase 1**: vorst/regen/koude-uren/kersenvlieg/vruchtbarsten/middel-vragen gaan via "
-    "betrouwbare, gegronde tools. Alle overige vragen gaan nu naar Qwen3-8B **met** de Track "
-    "1-kennisbank (RAG + reranking) en toegang tot dezelfde tools, in een stap-voor-stap "
-    "(ReACT) redeneerlus met zichtbare tussenstappen. Dit is nog het ongetrainde basismodel "
-    "(geen SFT/DPO) -- het kan dus nog steeds fouten maken buiten wat de kennisbank/tools "
-    "dekken. Zie ontwerp Deel E voor de trainingsroadmap."
-)
 
 ctx = render_sidebar(st)
 
@@ -162,6 +154,15 @@ for entry in st.session_state["chat_history"]:
                 st.text(meta["reasoning"])
         if meta.get("tool_calls"):
             st.caption("Tools gebruikt: " + ", ".join(meta["tool_calls"]))
+
+st.warning(
+    "**Fase 1**: vorst/regen/koude-uren/kersenvlieg/vruchtbarsten/middel-vragen gaan via "
+    "betrouwbare, gegronde tools. Alle overige vragen gaan nu naar Qwen3-8B **met** de Track "
+    "1-kennisbank (RAG + reranking) en toegang tot dezelfde tools, in een stap-voor-stap "
+    "(ReACT) redeneerlus met zichtbare tussenstappen. Dit is nog het ongetrainde basismodel "
+    "(geen SFT/DPO) -- het kan dus nog steeds fouten maken buiten wat de kennisbank/tools "
+    "dekken. Zie ontwerp Deel E voor de trainingsroadmap."
+)
 
 if prompt := st.chat_input("Stel een vraag, bijv. 'is er vorstrisico deze week?'"):
     st.session_state["chat_history"].append(("user", prompt, {}))
