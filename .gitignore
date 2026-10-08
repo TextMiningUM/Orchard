@@ -1,0 +1,63 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Downloaded model weights / HF cache -- always ignored, too large for git
+_models/
+.cache/
+
+# Pytest
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# --- Orchard-specific: the teler's own proprietary farm/business data -----------------
+# Raw handwritten logbook scans, the OCR/vision-transcribed database built from them, and
+# the rendered page images -- real operational data about one specific farm (which
+# products, when, how much), deliberately kept local-only, never pushed to a (possibly
+# public) research repo. See design_cherry_orchard_advisor.md Sec C.1 for what this is.
+Data/Data Log Books/
+Data/Orchard/OrchardLogbooks/orchard_logbook.db
+Data/Orchard/OrchardLogbooks/orchard_logbook.db.bak
+Data/Orchard/OrchardLogbooks/_transcripts/
+Data/Orchard/OrchardLogbooks/_raw_page_images/
+
+# Local-only settings: persisted sidebar lat/lon/address (real farm location) -- see
+# app/orchard_common.py's load_settings()/save_settings().
+Data/Orchard/orchard_settings.json
+
+# Possibly-copyrighted stock photo (filename pattern suggests a scraped/WordPress-hosted
+# image, not an original asset) -- exclude until ownership/licence is confirmed.
+Images/
+
+# Private project background docs (master-thesis briefing, World Bank report) -- same
+# "stays local" convention as Auto Pilot's own Docs/ folder.
+Docs/
+
+# Regenerable embedding/RAG caches (rebuilt on first use, once Phase 3 exists)
+*.emb.npy
+Data/Orchard/Orchard_Agents_Training/
+
+# Scratch/one-off scripts and logs (repo convention: never meant to be committed)
+_tmp_*.py
+_tmp_*.sh
+*.log
+_tmp/

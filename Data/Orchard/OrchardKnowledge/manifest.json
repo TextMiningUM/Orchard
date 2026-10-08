@@ -1,0 +1,81 @@
+[
+  {
+    "id": "wur_teelthandleidingen_139993",
+    "title": "Teelthandleidingen (WUR edepot)",
+    "category": "wur_groenkennisnet",
+    "url": "https://edepot.wur.nl/139993",
+    "language": "nl",
+    "note": "Algemene WUR-teelthandleiding; gevonden via Groen Kennisnet-verwijzing. Vereist browser User-Agent (bare request -> 403).",
+    "status": "acquired",
+    "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\wur_groenkennisnet\\wur_teelthandleidingen_139993.pdf",
+    "sha256": "e2363a2cb26fa387ea0ee22aba2615ffd19a8277a277f6f3406754010c05f10d",
+    "size_bytes": 822655,
+    "acquired_at": "2026-10-08T21:25:56.640157+00:00"
+  },
+  {
+    "id": "wur_onderstammenproef_kers_297528",
+    "title": "2005-14 onderstammenproef zoete kers 610044.30 (WUR edepot)",
+    "category": "wur_groenkennisnet",
+    "url": "https://edepot.wur.nl/297528",
+    "language": "nl",
+    "note": "Direct kersenteelt-specifiek: internationale onderstammenproef zoete kers (groei, productie, vruchtgrootte, barstgevoeligheid). Vereist browser User-Agent.",
+    "status": "acquired",
+    "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\wur_groenkennisnet\\wur_onderstammenproef_zoete_kers_297528.pdf",
+    "sha256": "2b690a62bab405ee506b39058a1b91cd01d718b601e97801c4a52d040877d9f9",
+    "size_bytes": 1045796,
+    "acquired_at": "2026-10-08T21:25:57.380401+00:00"
+  },
+  {
+    "id": "usda_handbook_442_sweet_cherries",
+    "title": "Sweet Cherries: Production, Marketing, and Processing (USDA Agriculture Handbook No. 442, 1973)",
+    "category": "usda_historisch",
+    "url": "https://www.govinfo.gov/content/pkg/GOVPUB-A-PURL-gpo25996/pdf/GOVPUB-A-PURL-gpo25996.pdf",
+    "language": "en",
+    "note": "Real USDA-publicatie (GovInfo, public domain). Vervangt o.a. de oudere Farmers' Bulletin 776 'Growing Cherries East of the Rocky Mountains' -- een werkende digitale kopie van FB 776 zelf (pre-1930) is deze sessie niet gevonden, zie het 'blocked'-record hieronder.",
+    "status": "acquired",
+    "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\usda_historisch\\usda_agriculture_handbook_442_sweet_cherries_1973.pdf",
+    "sha256": "49b662e19368cd567b6087b19bc51b27f1aced0ef30a4d1768d1cc13e1e92dea",
+    "size_bytes": 5243515,
+    "acquired_at": "2026-10-08T21:26:04.910861+00:00"
+  },
+  {
+    "id": "usda_farmers_bulletin_776_cherries",
+    "title": "Farmers' Bulletin 776 -- Growing Cherries East of the Rocky Mountains (pre-1930, historisch)",
+    "category": "usda_historisch",
+    "url": null,
+    "language": "en",
+    "note": "GECONTROLEERD 2026-10-08: geen werkende directe downloadlink gevonden op archive.org/HathiTrust/UNT Digital Library in deze sessie (FB-nummer-zoekacties leverden alleen andere bulletins op, bv. FB1399=Blackberry Growing). Niet verder geforceerd ('don't brute-force a blocked approach'); USDA Agriculture Handbook 442 hierboven dekt dezelfde stof met recentere, wel bereikbare bron.",
+    "status": "blocked"
+  },
+  {
+    "id": "eu_reg_2018_848_organic_nl",
+    "title": "Verordening (EU) 2018/848 inzake de biologische productie (NL, EUR-Lex)",
+    "category": "eu_wetgeving",
+    "url": "https://eur-lex.europa.eu/legal-content/NL/TXT/?uri=CELEX:32018R0848",
+    "language": "nl",
+    "note": "Officiële Nederlandstalige EUR-Lex-pagina, al in de doeltaal (geen vertaalstap nodig, zie ontwerp Sec C.6). Opgeslagen als HTML; tekstextractie is Fase 3-werk.",
+    "status": "acquired",
+    "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\eu_wetgeving\\eu_verordening_2018_848_biologische_productie_nl.html",
+    "sha256": "80d18a9eb27f75155a6c31979462b89b0f1ca04a1a5ecb4794e1bfa9a4af620f",
+    "size_bytes": 2155338,
+    "acquired_at": "2026-10-08T21:26:06.017314+00:00"
+  },
+  {
+    "id": "ctgb_bulk_export",
+    "title": "Ctgb bulk-export bestrijdingsmiddelendatabank (Excel)",
+    "category": "ctgb",
+    "url": null,
+    "language": "nl",
+    "note": "GECONTROLEERD 2026-10-08: de veelgeciteerde URL ctgb.blob.core.windows.net/documents/public-authorisations-report.xls resolvet niet meer (DNS-fout, bevestigd vanaf zowel lokale machine als los fetch-mechanisme) -- kennelijk verouderd/verplaatst. toelatingen.ctgb.nl zelf weigert scripted toegang (403, waarschijnlijk JS-vereiste SPA). Blijft een open gat; pipeline.orchard_tools.check_ctgb_toelating() blijft daarom een expliciete NotImplementedError-stub (nooit een verzonnen toelatingsstatus).",
+    "status": "blocked"
+  },
+  {
+    "id": "actua_steenfruit_archief",
+    "title": "Actua Steenfruit-archief (StonefruitConsult, oudere nummers)",
+    "category": "actua_steenfruit",
+    "url": null,
+    "language": "nl",
+    "note": "GECONTROLEERD 2026-10-08: het volledige archief is alleen toegankelijk voor CAF/StonefruitConsult-abonnees (inlogmuur) -- niet publiek scrapebaar. De 2 nummers die de teler al zelf heeft (#6, #7 2026) blijven de enige bron; zie Data/Data Log Books/Actua steenfruit #6 en #7 2026.pdf (niet gedupliceerd hierheen, blijft op de originele plek).",
+    "status": "blocked"
+  }
+]
