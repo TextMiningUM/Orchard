@@ -55,6 +55,10 @@ Docs/
 # Regenerable embedding/RAG caches (rebuilt on first use, once Phase 3 exists)
 *.emb.npy
 Data/Orchard/Orchard_Agents_Training/
+Data/Orchard/Orchard_JSON/
+
+# Sync tarballs created ad-hoc when deploying to the cloud pod -- never meant to be committed.
+sync_*.tar.gz
 
 # Scratch/one-off scripts and logs (repo convention: never meant to be committed)
 _tmp_*.py

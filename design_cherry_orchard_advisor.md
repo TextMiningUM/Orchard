@@ -444,6 +444,7 @@ Voorgestelde pagina's, in dezelfde stijl als `Basic Simulator/app/pages/1_Captai
 | **📅 Seizoensplanning** | Fase-overzicht + brown-envelope-eventlog (vorst, hagel, plaagpiek) over het lopende seizoen | `1_Captain_Mission.py` (Mission Briefing/Log) |
 | **📖 Logboek & Geschiedenis** | Doorzoekbaar overzicht van 2013–2026, plus invoer van nieuwe ingrepen | nieuw (geen directe mirror — Orchard-specifiek) |
 | **⚠️ Waarschuwingen** | Actieve/voorbije alerts (vorst tijdens bloei, regen vóór oogst, kersenvlieg-drempel) | Captain's "brown envelope" monitors |
+| **📈 Patroonherkenning** (toegevoegd 2026-10-09) | Automatische detectie van de meest oogst-relevante patronen in het Track 2-logboek (seizoenstiming-verschuiving, behandelfrequentie- en doseringstrends per categorie, plus een altijd-getoonde teeltkalender), met doorklik naar de onderliggende logboekregels. Detectielogica in `pipeline/orchard_patterns.py` (puur, los getest), UI in `app/pages/8_Patroonherkenning.py` | nieuw (geen directe mirror — Orchard-specifiek; vergelijkbaar in geest met Chief Engineer's `KNOWN_LIMITS`/anomaliedetectie, maar dan over het eigen episodische logboek i.p.v. vaste technische drempels) |
 
 <a id="sec-b10"></a>
 ## B.10 Evaluatieplan
@@ -659,3 +660,15 @@ first") — niet alles tegelijk bouwen, maar in deze volgorde:
 7. Wil je (zoals het masterproject-document als lange-termijnvisie noemt) vanaf het begin al rekening
    houden met een later te delen "multi-telers"-platform, of expliciet single-tenant houden voor v1
    (dit ontwerp gaat voorlopig uit van single-tenant, zie [A.8](#sec-a8))?
+8. **EU 2018/848 taalprobleem (ontdekt 2026-10-08, Fase 3)**: het opgeslagen HTML-bestand
+   (`eu_verordening_2018_848_biologische_productie_nl.html`, gedownload via
+   `.../legal-content/NL/TXT/?uri=CELEX:32018R0848`) bleek bij parsen toch **Engelstalig** te zijn
+   (`<title>Verordening - 2018/848 - EN - EUR-Lex</title>`) — waarschijnlijk content-negotiation op
+   basis van een ontbrekende/genegeerde `Accept-Language`-header, niet (zoals eerder vermoed) een
+   RDF/ELI-metadata-probleem. Een hernieuwde poging (met expliciete `/HTML/`- en `/PDF/`-varianten en
+   een `Accept-Language: nl`-header) kreeg herhaaldelijk `202 Accepted` met lege body terug van
+   EUR-Lex — waarschijnlijk tijdelijke rate-limiting na een paar snelle requests. Dit bestand is
+   daarom expliciet uitgesloten van de RAG-index (`pipeline/ingest/parse_orchard_documents.py`'s
+   `SKIP_FROM_RAG`) totdat een echt Nederlandstalige versie is bevestigd — ofwel door het later
+   opnieuw (rustiger) te proberen, ofwel door de Engelse tekst alsnog te vertalen conform het
+      project's eigen "eerst vertalen naar NL, dan agentic maken"-regel (zie Sec C.6).

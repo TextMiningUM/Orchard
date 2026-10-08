@@ -108,8 +108,13 @@ SOURCES: list[SourceSpec] = [
         url="https://eur-lex.europa.eu/legal-content/NL/TXT/?uri=CELEX:32018R0848",
         filename="eu_verordening_2018_848_biologische_productie_nl.html",
         language="nl", status="to_fetch",
-        note="Officiële Nederlandstalige EUR-Lex-pagina, al in de doeltaal (geen vertaalstap "
-             "nodig, zie ontwerp Sec C.6). Opgeslagen als HTML; tekstextractie is Fase 3-werk.",
+        note="GECORRIGEERD 2026-10-08 (Fase 3): bij parsen bleek dit bestand ondanks de /NL/-URL "
+             "toch Engelstalig te zijn (<title> zegt 'EN'). Hernieuwde pogingen (met /HTML/, /PDF/ "
+             "en Accept-Language: nl) kregen herhaaldelijk 202 Accepted/lege body van EUR-Lex terug "
+             "(waarschijnlijk tijdelijke rate-limiting) -- niet verder geforceerd. Dit bestand blijft "
+             "op schijf staan maar is expliciet uitgesloten van de RAG-index "
+             "(pipeline/ingest/parse_orchard_documents.py SKIP_FROM_RAG) totdat een echte NL-versie "
+             "bevestigd is; zie ontwerp Deel F punt 8.",
     ),
     SourceSpec(
         id="ctgb_bulk_export",
@@ -134,6 +139,49 @@ SOURCES: list[SourceSpec] = [
              "nummers die de teler al zelf heeft (#6, #7 2026) blijven de enige bron; "
              "zie Data/Data Log Books/Actua steenfruit #6 en #7 2026.pdf (niet gedupliceerd "
              "hierheen, blijft op de originele plek).",
+    ),
+    # -- Fase 2 vervolgronde (2026-10-08, tweede sessie) --------------------------------
+    SourceSpec(
+        id="netafim_kersen_buiten_adviesrapport_2021",
+        title="Kersen (Buiten) Adviesrapport 2021 (Netafim)",
+        category="teelt_advies",
+        url="https://www.netafim.nl/contentassets/fd77f39c3a734ab8abf584a59a31390b/kersen-buiten-adviesrapport-2021.pdf",
+        filename="netafim_kersen_buiten_adviesrapport_2021.pdf",
+        language="nl", status="to_fetch",
+        note="Commercieel irrigatie/fertigatie-adviesrapport specifiek voor buitenteelt "
+             "zoete kers (NL) -- onderdoorberegening tegen nachtvorst, bemestingsschema's. "
+             "Bron is een leverancier (Netafim), geen onafhankelijk onderzoeksinstituut -- "
+             "bij gebruik in antwoorden expliciet als zodanig citeren, niet als WUR/Ctgb-"
+             "niveau autoriteit behandelen.",
+    ),
+    SourceSpec(
+        id="biofruitnet_zoete_kers_onderstammen",
+        title="Zoete kers: eigenschappen van onderstammen (BIOFRUITNET, Horizon 2020)",
+        category="wur_groenkennisnet",
+        url="https://biofruitnet.eu/wp-content/uploads/2023/04/80.PA_Zoete_kers_Eigenschappen_van_onderstammen_NL.pdf",
+        filename="biofruitnet_zoete_kers_onderstammen_nl.pdf",
+        language="nl", status="to_fetch",
+        note="EU Horizon 2020-project BIOFRUITNET (biologische fruitteelt kennisuitwisseling) -- "
+             "Nederlandstalige factsheet over onderstam-eigenschappen voor zoete kers, "
+             "aanvullend op de WUR-onderstammenproef hierboven.",
+    ),
+    SourceSpec(
+        id="osu_em9267_spotted_wing_drosophila",
+        title="Spotted Wing Drosophila Pest Alert (EM 9267, Oregon State University Extension)",
+        category="suzukii_swd",
+        url="https://extension.oregonstate.edu/sites/default/files/documents/em9267.pdf",
+        filename="osu_em9267_spotted_wing_drosophila.pdf",
+        language="en", status="to_fetch",
+        note="Amerikaanse university-extension-publicatie specifiek over Drosophila suzukii "
+             "(herkenning, monitoring, beheersing) -- gebruikt om "
+             "pipeline/orchard_phenology_spec.py's suzukii-risicofunctie van een echte, "
+             "citeerbare bron te voorzien i.p.v. 'illustrative placeholder'. Een directe "
+             "Nederlandstalige WUR-factsheet over hetzelfde onderwerp (Helsen & Heijerman, "
+             "PPO Factsheet 31) kon deze sessie NIET geverifieerd worden -- een door "
+             "websearch gesuggereerd edepot.wur.nl/281922 bleek bij download een compleet "
+             "ander (tuinbouw-statistiek) document te zijn, dus niet gebruikt (zelfde les "
+             "als de eerdere FB1399-misser: nooit een gesuggereerde ID vertrouwen zonder "
+             "de gedownloade inhoud te verifiëren).",
     ),
 ]
 

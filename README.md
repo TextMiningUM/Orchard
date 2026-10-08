@@ -17,8 +17,10 @@ Voor de volledige werkafspraken (local-vs-cloud split, two-track datamodel, code
 | Historische logboeken (2013–2026) ge-OCR'd naar database | Klaar — blijft lokaal, zie hieronder |
 | Qwen3-8B live op cloud-GPU-pod (deterministische tools blijven leidend, LLM alleen voor open vragen) | Klaar |
 | Publieke read-only demo via HTTPS | Klaar |
-| Fase 2 — Track 1-kennisbank verzamelen (WUR/USDA/Ctgb/EU) | Loopt |
-| Fase 3-8 — RAG/KG/PG, trainingsdata, SFT/DPO-training, beslislaag, missielaag | Nog te doen |
+| Fase 2 — Track 1-kennisbank verzamelen (WUR/USDA/Ctgb/EU) | Loopt (7 documenten) |
+| Chatbot: RAG + reranking + ReACT tool-calling + zichtbare CoT | Klaar |
+| Patroonherkenning (automatische patroondetectie in het logboek) | Klaar |
+| Fase 3-8 — RAG/KG/PG verder, trainingsdata, SFT/DPO-training, beslislaag, missielaag | Nog te doen |
 
 ## Eigen bedrijfsgegevens blijven lokaal
 
