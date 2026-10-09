@@ -63,7 +63,9 @@ rekentools mag raadplegen voor een onderbouwd antwoord.
   kunt daarna niet meer wisselen van keuze voor dat antwoord.
 
 Een antwoord duurt soms een halve minuut — zolang de melding *"De adviseur denkt na..."* zichtbaar is,
-is het systeem bezig; even geduld dus.
+is het systeem bezig; even geduld dus. Als je een paar minuten niets gevraagd hebt, duurt de eerste
+volgende vraag ook iets langer: het model wordt dan automatisch van het rekenproces afgehaald om geen
+onnodige capaciteit vast te houden, en laadt bij de eerstvolgende vraag weer opnieuw.
 
 Je kunt ook **vervolgvragen** stellen (bijvoorbeeld eerst *"wat is suzuki-fruitvlieg?"* en dan *"en
 is dat erg voor kersen?"*) — het model houdt rekening met wat je eerder in dezelfde chat hebt

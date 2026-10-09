@@ -887,6 +887,14 @@ Deel A-F zelf ook bijgewerkt met een verwijzing hierheen.
   8801, omdat de gebruiker al een lokale SSH-tunnel op 8801 had staan naar een ANDER
   Auto-Pilot-Qwen-proces — gedocumenteerd in zowel `cloud/qwen_inference_server.py` als
   `pipeline/qwen_remote.py` zodat dit niet per ongeluk terugverandert.
+- **GPU-kosten: automatische idle-unload** (`cloud/qwen_inference_server.py`, `IDLE_UNLOAD_S`): een
+  achtergrondthread (`_idle_unload_loop()`) verwijdert het Qwen3-8B-model uit VRAM als er
+  **3 minuten (180s)** geen `/generate`-verzoek is geweest — zichtbaar in `nvidia-smi`/`/status` als
+  `loaded_models: []`. De eerstvolgende vraag daarna laadt het model opnieuw (een paar seconden
+  extra), maar dat is bewust geaccepteerd: de GPU staat zo het grootste deel van een rustige dag
+  leeg i.p.v. onnodig VRAM (en dus stroom/kosten) vast te houden voor een model dat toch niet gebruikt
+  wordt. Was aanvankelijk op 60s gezet, op verzoek verruimd naar 180s zodat een gebruiker die binnen
+  een paar minuten een vervolgvraag stelt niet steeds opnieuw de laadtijd betaalt.
 
 <a id="sec-g2"></a>
 ## G.2 Walking skeleton: deterministische kern + Streamlit-app

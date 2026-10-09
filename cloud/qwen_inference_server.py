@@ -50,7 +50,7 @@ _active_key: tuple[str, str] | None = None
 _cache_lock = threading.Lock()
 _gen_lock = threading.Lock()  # one generation at a time -- a single GPU can't usefully parallelise anyway
 
-IDLE_UNLOAD_S = 60.0  # evict an idle cached model after this many seconds with no /generate traffic
+IDLE_UNLOAD_S = 180.0  # evict an idle cached model after this many seconds with no /generate traffic
 
 
 def _get_model(domain: str, weights: str):
