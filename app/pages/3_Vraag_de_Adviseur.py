@@ -51,17 +51,7 @@ from datetime import datetime, timezone  # noqa: E402
 
 st.set_page_config(page_title="Vraag de Adviseur", layout="wide")
 st.title("Vraag de Adviseur")
-
-with st.form("ask_form_top", clear_on_submit=True):
-    prompt_top = st.text_input(
-        "Stel een vraag",
-        placeholder=(
-            'Typ je vraag helemaal onderaan dit scherm, bijvoorbeeld "is er vorstrisico deze '
-            'week?" of "wat zegt de kennisbank over Monilia?".'
-        ),
-        label_visibility="collapsed",
-    )
-    submitted_top = st.form_submit_button("Vraag stellen")
+st.caption("Typ je vraag hieronder in het invoerveld (altijd onderaan dit scherm zichtbaar).")
 
 ctx = render_sidebar(st)
 
@@ -291,18 +281,18 @@ for i, entry in enumerate(st.session_state["chat_history"]):
         else:
             st.markdown(msg)
 
-if submitted_top and prompt_top:
-    st.session_state["chat_history"].append(("user", prompt_top, {}))
+if prompt := st.chat_input("Stel een vraag, bijv. 'is er vorstrisico deze week?'"):
+    st.session_state["chat_history"].append(("user", prompt, {}))
     with st.chat_message("user"):
-        st.markdown(prompt_top)
+        st.markdown(prompt)
     with st.chat_message("assistant"):
         with st.spinner(
             "De adviseur denkt na... (bij een vraag die niet direct door een tool wordt "
             "beantwoord, raadpleegt het AI-model eerst de kennisbank en kan het 30-60 "
             "seconden duren)"
         ):
-            result = _route_question(prompt_top)
-        result["question"] = prompt_top
+            result = _route_question(prompt)
+        result["question"] = prompt
         result["feedback"] = None
         st.session_state["chat_history"].append(("assistant", result["answer"], result))
         _save_current_chat()
