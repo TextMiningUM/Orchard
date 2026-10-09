@@ -931,15 +931,20 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
     pdfplumber, en de perplexity-gebaseerde chunk-kwaliteitscontrole), maar wordt waardevoller
     naarmate de kennisbank groeit.
 19. **Het logboek zelf (Track 2) is nog GEEN RAG-bron voor de Adviseur** (gedeeltelijk al
-    gesignaleerd in [Deel E](#deel-e) stap 6, hier expliciet herhaald op verzoek van de
-    gebruiker): de 14 jaar aan eigen logboekregels worden nu wel gebruikt door
-    Patroonherkenning/Seizoenswaarschuwingen/Gebruik van Middelen ([G.7](#sec-g7)-[G.9](#sec-g9))
-    — stuk voor stuk eigen, deterministische analysefuncties — maar "Vraag de Adviseur" kan er
-    nog NIET zelf in zoeken/uit citeren. De teler moet dus kunnen leren van zijn EIGEN historie,
-    niet alleen van externe literatuur: een vraag als "wat deed ik de vorige keer dat de
-    kersenvlieg explosief toesloeg?" of "welk middel gebruikte ik vorig jaar tegen Monilia, en
-    hielp dat?" zou idealiter ook een logboek-RAG-zoekopdracht triggeren, naast de bestaande
-    Track 1-kennisbankzoekopdracht. Dit hangt nauw samen met punt 14 hierboven
+    gesignaleerd in [Deel E](#deel-e) stap 6, hier expliciet herhaald en aangescherpt op verzoek
+    van de gebruiker): **de 14 jaar (2013–2026) aan eigen, handgeschreven logboekregels zijn een
+    goudmijn** — twaalf-plus seizoenen van exact welke ingreep wanneer, bij welk weer, met welk
+    resultaat, op DEZE specifieke boomgaard, met DEZE rassen en DEZE bodem. Dat is precies het
+    soort gedetailleerde, lokale ervaringskennis die geen enkele externe WUR-/PCFruit-/Bayer-
+    bron ooit kan evenaren, en die daarom NIET als bijzaak behandeld mag worden naast Track 1 —
+    de logboekregels moeten een eigen, volwaardige RAG-bron worden. Nu wordt deze data wel al
+    gebruikt door Patroonherkenning/Seizoenswaarschuwingen/Gebruik van Middelen
+    ([G.7](#sec-g7)-[G.9](#sec-g9)) — stuk voor stuk eigen, deterministische analysefuncties —
+    maar "Vraag de Adviseur" kan er nog NIET zelf in zoeken/uit citeren. De teler moet dus kunnen
+    leren van zijn EIGEN historie, niet alleen van externe literatuur: een vraag als "wat deed ik
+    de vorige keer dat de kersenvlieg explosief toesloeg?" of "welk middel gebruikte ik vorig
+    jaar tegen Monilia, en hielp dat?" zou idealiter ook een logboek-RAG-zoekopdracht triggeren,
+    naast de bestaande Track 1-kennisbankzoekopdracht. Dit hangt nauw samen met punt 14 hierboven
     (Observation-Action-Consequence-tuples) — dezelfde logboekregels zijn de bron voor beide,
     en een OAC-tuple-extractie zou een natuurlijke tussenstap kunnen zijn vóór een volledige
     logboek-RAG-index (al is dat niet strikt noodzakelijk: ook de ruwe, ongestructureerde
