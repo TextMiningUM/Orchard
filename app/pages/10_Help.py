@@ -162,6 +162,16 @@ plaats van geraden te worden.
 """
     )
 
+with st.expander("Instellingen"):
+    st.markdown(
+        """
+Hier pas je de locatie, het ras en de huidige fenologische fase van je boomgaard aan — alle andere
+pagina's gebruiken deze instelling (bijvoorbeeld voor het ophalen van het juiste lokale weer). Vul
+een adres in en klik op "Zoek & onthoud coördinaten", of voer handmatig breedte-/lengtegraad in. De
+locatie wordt onthouden na een herstart van de app; ras en fase controleer je elke sessie opnieuw.
+"""
+    )
+
 st.divider()
 st.subheader("Veelgestelde vragen")
 

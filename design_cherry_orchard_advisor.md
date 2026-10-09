@@ -84,6 +84,7 @@ Bronnen voor dit ontwerp:
   - [G.12 Belangrijkste geleerde lessen / bugs opgelost](#sec-g12)
   - [G.13 Git/GitHub en synchronisatie](#sec-g13)
   - [G.14 Chat-UX: feedback/grounding, gespreksgeheugen en bewaarde chats](#sec-g14)
+  - [G.15 Boomgaard-instellingen verhuisd naar een eigen "Instellingen"-pagina](#sec-g15)
 
 ---
 
@@ -473,7 +474,7 @@ en op de cloud-pod aanvullend de volledige ML-stack (`torch` cu128, `transformer
 ## B.9 Streamlit-UI (mirror van Engine Room / Captain Mission dashboards)
 
 Oorspronkelijk voorgestelde pagina's, in dezelfde stijl als `Basic Simulator/app/pages/1_Captain_Mission.py`
-en `2_Engine_Room.py` — **inmiddels alle 10 daadwerkelijk gebouwd** (geen emoji in bestandsnamen/labels
+en `2_Engine_Room.py` — **inmiddels alle 11 daadwerkelijk gebouwd** (geen emoji in bestandsnamen/labels
 meer, zie [G.2](#sec-g2)/[G.10](#sec-g10) voor de reden; de emoji in onderstaande tabel zijn alleen ter
 illustratie van het oorspronkelijke ontwerp-idee). Exacte huidige bestandsnamen staan in
 [Deel D](#deel-d):
@@ -489,6 +490,7 @@ illustratie van het oorspronkelijke ontwerp-idee). Exacte huidige bestandsnamen 
 | **📚 Bibliotheek** (toegevoegd 2026-10-08) | Overzicht van en toegang tot de Track 1-kennisbank (download + inline PDF-voorbeeld per document), gevoed door `manifest.json` | nieuw — vergelijkbaar met hoe Chief Engineer's manual-bibliotheek wordt ontsloten, maar dan als eigen pagina i.p.v. alleen RAG-achtergrond |
 | **🧪 Gebruik van Middelen** (toegevoegd 2026-10-09) | Telt alle toegepaste middelen op (gecanonicaliseerd + gecategoriseerd: gewasbescherming schimmel/bacterie, insect/mijt, onkruid; meststof/bladvoeding; hulpstof; bestuiving; eerlijk "overig" waar onzeker), per week/maand/kwartaal/jaar, met drill-down per product. Logica in `pipeline/orchard_middelen.py` | nieuw — directe invulling van het wettelijke "spuitregister"-idee uit [B.6](#sec-b6), nu met een bruikbaar overzicht in plaats van alleen ruwe logboekregels |
 | **❓ Help** (toegevoegd 2026-10-09) | Gebruikersgerichte documentatie (geen techniek): wat elke pagina doet, hoe je 'm gebruikt, veelgestelde vragen | nieuw — Auto Pilot heeft dit niet apart; hier toegevoegd omdat de eindgebruiker (teler) geen ontwikkelaar is |
+| **⚙️ Instellingen** (toegevoegd 2026-10-09) | Locatie (adres zoeken + onthouden), ras, en huidige fenologische fase — voorheen op élke pagina bovenaan de zijbalk, nu hier gecentraliseerd zodat de zijbalk overal leeg/compact is (zie [G.15](#sec-g15)) | nieuw — Auto Pilot heeft geen vergelijkbare pagina (minder per-sessie-configuratie nodig) |
 
 <a id="sec-b10"></a>
 ## B.10 Evaluatieplan
@@ -727,7 +729,8 @@ Orchard/                                    (GitHub: https://github.com/TextMini
 │       ├── 7_Bibliotheek.py
 │       ├── 8_Patroonherkenning.py
 │       ├── 9_Gebruik_van_Middelen.py
-│       └── 10_Help.py                     ← nieuw, zie G.10
+│       ├── 10_Help.py                     ← nieuw, zie G.10
+│       └── 11_Instellingen.py             ← nieuw, zie G.15 (locatie/ras/fase, uit de zijbalk gehaald)
 ├── core/
 │   ├── paths.py                           ← AgentPaths(domain="Orchard")
 │   ├── io.py, qwen_loader.py
@@ -1218,3 +1221,30 @@ Twee bugs kwamen bij het bouwen van bovenstaande aan het licht (zie ook [G.12](#
   (`[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]`), met tekstlabels als vervanging. Dit project heeft dus
   een terugkerende "geen emoji in de UI"-afspraak die bij élke nieuwe feature opnieuw gecontroleerd
   moet worden, niet een eenmalige opschoning.
+
+<a id="sec-g15"></a>
+## G.15 Boomgaard-instellingen verhuisd naar een eigen "Instellingen"-pagina
+
+De locatie-/ras-/fase-invoervelden stonden eerst op élke pagina bovenaan de zijbalk
+(`orchard_common.render_sidebar()`) — bij een lager browservenster duwde dat andere
+zijbalk-inhoud (met name de "Chats"-lijst op Vraag de Adviseur, zie [G.14](#sec-g14)) buiten
+beeld zonder te scrollen. Opgelost in twee stappen (de eerste bleek nog niet ver genoeg):
+
+1. Eerst een compacte samenvatting + link geprobeerd (`st.sidebar.page_link(...)`) i.p.v. de
+   volledige velden. Dit werkte in de echte app, maar nam alsnog ruimte in — de gebruiker gaf
+   terecht aan dat zelfs die samenvatting niet nodig is ("de gebruiker kan zelf wel verzinnen
+   dat dat in instellingen zit").
+2. **`render_sidebar()` rendert nu helemaal niets meer** — de functie laadt/seedt alleen nog
+   `st.session_state` (met dezelfde "onthoud de laatst gezochte locatie"-logica als voorheen)
+   en geeft een `OrchardContext` terug; geen enkele widget, caption of link meer in de zijbalk
+   van welke pagina dan ook.
+- Nieuwe pagina `app/pages/11_Instellingen.py`: bevat nu de volledige, ongewijzigde
+  invoervelden (adres zoeken + onthouden, lat/lon, ras, fenologische fase) die voorheen in de
+  zijbalk stonden — zelfde gedrag, alleen een andere plek in de navigatie. Ook toegevoegd aan
+  Help ([10_Help.py](#sec-g10)).
+- **Les (AppTest-valkuil, geen echte bug)**: `st.page_link("pages/11_Instellingen.py", ...)`
+  gaf tijdens een `AppTest`-run `StreamlitPageNotFoundError`, terwijl het in de echte, draaiende
+  multipage-app prima werkte — `AppTest.from_file()` laadt één pagina-script geïsoleerd, zonder
+  de omringende multipage-navigatiecontext te simuleren, dus `page_link`/`switch_page` kunnen
+  daar niet getest worden. Niet verder nagejaagd omdat stap 2 hierboven `page_link` toch weer
+  overbodig maakte.

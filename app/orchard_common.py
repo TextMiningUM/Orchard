@@ -23,7 +23,6 @@ import sqlite3
 
 from core.paths import AgentPaths  # noqa: E402
 from pipeline.orchard_phenology_spec import (  # noqa: E402
-    PHENOLOGY_STAGES,
     evaluate_chill_hours,
     evaluate_frost_risk,
     evaluate_gdd,
@@ -31,7 +30,6 @@ from pipeline.orchard_phenology_spec import (  # noqa: E402
     evaluate_suzukii_risk,
 )
 from pipeline.orchard_tools import (  # noqa: E402
-    geocode_address,
     get_rain_nowcast,
     get_weather_forecast,
     get_weather_history,
@@ -181,9 +179,13 @@ def get_context_from_session(st) -> OrchardContext:
 
 
 def render_sidebar(st) -> OrchardContext:
-    """Shared sidebar controls (location/variety/stage) -- rendered identically on every page."""
-    st.sidebar.header("Boomgaard-instellingen")
+    """Laadt/seedt de boomgaard-instellingen (locatie/ras/fase) in ``st.session_state`` en
+    geeft ze terug als ``OrchardContext`` -- rendert zelf NIETS meer in de zijbalk.
 
+    Vroeger stonden hier de volledige invoervelden zelf (adres zoeken, lat/lon, ras, fase),
+    later een compacte samenvatting + link -- beide namen nog ruimte in de zijbalk in,
+    terwijl de teler zelf prima weet dat die instellingen onder "Instellingen" in het menu
+    staan. De invoervelden zelf staan op `app/pages/11_Instellingen.py`."""
     # First render of this session: seed session_state from the persisted settings file
     # (orchard_settings.json) instead of the hardcoded placeholder, so a geocoded address
     # from a PREVIOUS run/restart is remembered (design doc Sec B.9 request: "onthouden").
@@ -192,54 +194,13 @@ def render_sidebar(st) -> OrchardContext:
         st.session_state["orchard_lat"] = persisted.get("lat", DEFAULT_LAT)
         st.session_state["orchard_lon"] = persisted.get("lon", DEFAULT_LON)
         st.session_state["orchard_address"] = persisted.get("address", "")
+    st.session_state.setdefault("orchard_variety", "Kordia")
+    st.session_state.setdefault("orchard_stage", default_stage_for_month(date.today().month))
 
-    with st.sidebar.expander("Locatie via adres zoeken", expanded=not st.session_state.get("orchard_address")):
-        address_input = st.text_input(
-            "Adres (straat, postcode, plaats)", value=st.session_state.get("orchard_address", ""),
-            key="orchard_address_input",
-        )
-        if st.button("Zoek & onthoud coördinaten", width="stretch"):
-            if not address_input.strip():
-                st.warning("Vul eerst een adres in.")
-            else:
-                try:
-                    result = geocode_address(address_input.strip())
-                except Exception as exc:
-                    result = None
-                    st.error(f"Geocoding mislukt: {exc}")
-                if result is None:
-                    st.error("Geen resultaat gevonden voor dit adres.")
-                else:
-                    st.session_state["orchard_lat"] = result["lat"]
-                    st.session_state["orchard_lon"] = result["lon"]
-                    st.session_state["orchard_address"] = address_input.strip()
-                    save_settings({
-                        "lat": result["lat"], "lon": result["lon"], "address": address_input.strip(),
-                    })
-                    st.success(f"Gevonden: {result['display_name']} ({result['lat']:.4f}, {result['lon']:.4f}) — onthouden.")
-                    st.rerun()
-        st.caption("Of vul hieronder handmatig breedte-/lengtegraad in.")
-
-    lat = st.sidebar.number_input("Breedtegraad (lat)", value=st.session_state.get("orchard_lat", DEFAULT_LAT), format="%.4f")
-    lon = st.sidebar.number_input("Lengtegraad (lon)", value=st.session_state.get("orchard_lon", DEFAULT_LON), format="%.4f")
-    variety = st.sidebar.selectbox(
-        "Ras", KNOWN_VARIETIES,
-        index=KNOWN_VARIETIES.index(st.session_state.get("orchard_variety", "Kordia")),
+    return OrchardContext(
+        lat=st.session_state["orchard_lat"], lon=st.session_state["orchard_lon"],
+        variety=st.session_state["orchard_variety"], stage=st.session_state["orchard_stage"],
     )
-    stage_default = st.session_state.get("orchard_stage", default_stage_for_month(date.today().month))
-    stage = st.sidebar.selectbox(
-        "Huidige fenologische fase (handmatig, zie open vraag in ontwerp)",
-        PHENOLOGY_STAGES, index=PHENOLOGY_STAGES.index(stage_default),
-    )
-    st.session_state["orchard_lat"] = lat
-    st.session_state["orchard_lon"] = lon
-    st.session_state["orchard_variety"] = variety
-    st.session_state["orchard_stage"] = stage
-    st.sidebar.caption(
-        "Fase-detectie is nu nog handmatig. Een echt bloeidatum-voorspelmodel o.b.v. "
-        "koude-uren + graaddagen staat op de roadmap (design doc Deel E, stap 2)."
-    )
-    return OrchardContext(lat=lat, lon=lon, variety=variety, stage=stage)
 
 
 def compute_season_snapshot(ctx: OrchardContext):

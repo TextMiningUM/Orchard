@@ -54,16 +54,6 @@ st.title("Vraag de Adviseur")
 
 ctx = render_sidebar(st)
 
-with st.sidebar:
-    reconnect_tunnel()  # no-op if already reachable (e.g. running on the pod itself)
-    if is_remote_server_up():
-        st.caption("Qwen3-8B-server: bereikbaar")
-    else:
-        st.caption(
-            "Qwen3-8B-server: niet bereikbaar. Lokaal? Zet eerst een SSH-tunnel op "
-            "(zie `pipeline/qwen_remote.py`) of vul `.env` (ORCHARD_CLOUD_SSH_HOST/KEY) in."
-        )
-
 
 def _new_session_state(session) -> None:
     st.session_state["current_chat_id"] = session.id
@@ -95,6 +85,8 @@ def _save_current_chat() -> None:
     save_chat(session)
 
 
+# Direct boven aan de zijbalk (vóór de technische status-captions), zodat de chatlijst ook
+# bij een lager browservenster meteen zichtbaar is zonder te scrollen.
 with st.sidebar:
     st.divider()
     st.subheader("Chats")
@@ -119,6 +111,17 @@ with st.sidebar:
             if is_current:
                 _new_session_state(new_chat_session())
             st.rerun()
+    st.divider()
+
+with st.sidebar:
+    reconnect_tunnel()  # no-op if already reachable (e.g. running on the pod itself)
+    if is_remote_server_up():
+        st.caption("Qwen3-8B-server: bereikbaar")
+    else:
+        st.caption(
+            "Qwen3-8B-server: niet bereikbaar. Lokaal? Zet eerst een SSH-tunnel op "
+            "(zie `pipeline/qwen_remote.py`) of vul `.env` (ORCHARD_CLOUD_SSH_HOST/KEY) in."
+        )
 
 _rag_index = load_index()
 with st.sidebar:
