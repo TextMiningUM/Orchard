@@ -930,8 +930,27 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
     [G.17](#sec-g17) voor de twee lagere-moeite fixes die WEL al zijn doorgevoerd: PyMuPDF i.p.v.
     pdfplumber, en de perplexity-gebaseerde chunk-kwaliteitscontrole), maar wordt waardevoller
     naarmate de kennisbank groeit.
+19. **Het logboek zelf (Track 2) is nog GEEN RAG-bron voor de Adviseur** (gedeeltelijk al
+    gesignaleerd in [Deel E](#deel-e) stap 6, hier expliciet herhaald op verzoek van de
+    gebruiker): de 14 jaar aan eigen logboekregels worden nu wel gebruikt door
+    Patroonherkenning/Seizoenswaarschuwingen/Gebruik van Middelen ([G.7](#sec-g7)-[G.9](#sec-g9))
+    — stuk voor stuk eigen, deterministische analysefuncties — maar "Vraag de Adviseur" kan er
+    nog NIET zelf in zoeken/uit citeren. De teler moet dus kunnen leren van zijn EIGEN historie,
+    niet alleen van externe literatuur: een vraag als "wat deed ik de vorige keer dat de
+    kersenvlieg explosief toesloeg?" of "welk middel gebruikte ik vorig jaar tegen Monilia, en
+    hielp dat?" zou idealiter ook een logboek-RAG-zoekopdracht triggeren, naast de bestaande
+    Track 1-kennisbankzoekopdracht. Dit hangt nauw samen met punt 14 hierboven
+    (Observation-Action-Consequence-tuples) — dezelfde logboekregels zijn de bron voor beide,
+    en een OAC-tuple-extractie zou een natuurlijke tussenstap kunnen zijn vóór een volledige
+    logboek-RAG-index (al is dat niet strikt noodzakelijk: ook de ruwe, ongestructureerde
+    logboekregels zelf zouden al een eerste, eenvoudiger versie van deze RAG-bron kunnen vormen).
+    Let op: dit raakt de bestaande "nooit proprietaire bedrijfsdata naar een publieke/gedeelde
+    context lekken"-afspraak (zie [G.13](#sec-g13)) niet — de logboek-RAG-index zou, net als de
+    database zelf, lokaal-only blijven en nooit in de publieke pod-kennisbank terechtkomen.
+    **Nog niet gestart** — op de lijst voor een volgende versie.
 
 ---
+
 
 
 <a id="deel-g"></a>
