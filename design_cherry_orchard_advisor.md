@@ -87,6 +87,7 @@ Bronnen voor dit ontwerp:
   - [G.15 Boomgaard-instellingen verhuisd naar een eigen "Instellingen"-pagina](#sec-g15)
   - [G.16 Fase 4: gerichte kennisbank-uitbreiding (10 praktijkproblemen) + retrieval-afstelling](#sec-g16)
   - [G.17 PDF-parseerfix (PyMuPDF) + automatische RAG-chunk-kwaliteitscontrole](#sec-g17)
+  - [G.18 RAG-chunker vervangen door Auto Pilot's sectie/topic-boundary-aanpak + 200-probleem-kennisbank](#sec-g18)
 
 ---
 
@@ -542,7 +543,7 @@ Hergebruik van het masterproject-document se eigen evaluatieplan, geconcretiseer
 | Actua Steenfruit vakbladartikelen (StonefruitConsult/Delphy/Caf/Fruitconsult, Wageningen) | `Data/Data Log Books/Actua steenfruit #6 en #7 2026.pdf` | Aanwezig, tekst succesvol geëxtraheerd; zeer bruikbaar als "levend" vakkennis-voorbeeld (koude-uren, snoei-technieken, bespuitingstiming, bestuiving) |
 | Masterproject-briefing | `Docs/Training an Orchard Agentic Chatbot...pdf` | Gelezen, dit ontwerp volgt de scope direct |
 | World Bank AI-in-landbouw rapport | `Docs/Harnessing Artificial Intelligence for Agricultural Transformation...pdf` | Gelezen (voor bredere motivatie/context; geen kersen-specifieke data) |
-| **Track 1-kennisbank (Fase 2+4, zie [G.5](#sec-g5)/[G.16](#sec-g16))** | `Data/Orchard/OrchardKnowledge/<categorie>/*.pdf`/`.html` + `manifest.json` | **21 documenten acquired, 3 bewust geblokkeerd-en-gedocumenteerd, 0 failed.** Fase 2: WUR `wur_teelthandleidingen_139993.pdf`, `wur_onderstammenproef_zoete_kers_297528.pdf`; USDA `usda_agriculture_handbook_442_sweet_cherries_1973.pdf` (1973, Engelstalig); `netafim_kersen_buiten_adviesrapport_2021.pdf` (commercieel); `osu_em9267_spotted_wing_drosophila.pdf` (Engelstalig); `biofruitnet_zoete_kers_onderstammen_nl.pdf`. Fase 4 ([G.16](#sec-g16), 2026-10-09): 14 extra Nederlandstalige praktijkbronnen gericht op de 10 meest voorkomende kersenteelt-problemen (Monilia, bacteriekanker/hagelschot, kersenvlieg, zwarte kersenluis, bladvlekkenziekte, vogelschade, vorstberegening, bestuiving/rassenkeuze) — 2 extra BIOFRUITNET-factsheets + 12 HTML-bronnen (WUR/EU-niveau waar mogelijk, anders commerciële/teler-praktijkbronnen, expliciet zo gelabeld). Geblokkeerd: Ctgb-bulk-export (dode URL), Actua Steenfruit-archief (inlogmuur), pre-1930 USDA-bulletin (geen werkende link), pcfruit.be kennisdatabank (inlogmuur/leeg zonder lidmaatschap, zie [G.16](#sec-g16)). **Bekend, nog open issue**: de eerst-gedownloade EU 2018/848-pagina bleek per ongeluk Engelstalig (zie [Deel F](#deel-f) punt 8) en is expliciet uitgesloten van de RAG-index; meerdere PDF's hebben vermoedelijk kolom-interleaving-parseproblemen (zie [Deel F](#deel-f) punt 13, nog niet opgelost). |
+| **Track 1-kennisbank (Fase 2+4+5, zie [G.5](#sec-g5)/[G.16](#sec-g16)/[G.18](#sec-g18))** | `Data/Orchard/OrchardKnowledge/<categorie>/*.pdf`/`.html`/`.md` + `manifest.json` | **22 documenten acquired, 3 bewust geblokkeerd-en-gedocumenteerd, 0 failed.** Fase 2: WUR `wur_teelthandleidingen_139993.pdf`, `wur_onderstammenproef_zoete_kers_297528.pdf`; USDA `usda_agriculture_handbook_442_sweet_cherries_1973.pdf` (1973, Engelstalig); `netafim_kersen_buiten_adviesrapport_2021.pdf` (commercieel); `osu_em9267_spotted_wing_drosophila.pdf` (Engelstalig); `biofruitnet_zoete_kers_onderstammen_nl.pdf`. Fase 4 ([G.16](#sec-g16), 2026-10-09): 14 extra Nederlandstalige praktijkbronnen gericht op de 10 meest voorkomende kersenteelt-problemen (Monilia, bacteriekanker/hagelschot, kersenvlieg, zwarte kersenluis, bladvlekkenziekte, vogelschade, vorstberegening, bestuiving/rassenkeuze) — 2 extra BIOFRUITNET-factsheets + 12 HTML-bronnen (WUR/EU-niveau waar mogelijk, anders commerciële/teler-praktijkbronnen, expliciet zo gelabeld). Fase 5 ([G.18](#sec-g18), 2026-10-09): `kersenteelt_100_problemen_jaar_internet_crawl.md` — door de gebruiker zelf samengesteld, 200 genummerde praktijkproblemen met per-probleem bronvermelding, eerste `.md`-brontype in de kennisbank. Geblokkeerd: Ctgb-bulk-export (dode URL), Actua Steenfruit-archief (inlogmuur), pre-1930 USDA-bulletin (geen werkende link), pcfruit.be kennisdatabank (inlogmuur/leeg zonder lidmaatschap, zie [G.16](#sec-g16)). **Bekend, nog open issue**: de eerst-gedownloade EU 2018/848-pagina bleek per ongeluk Engelstalig (zie [Deel F](#deel-f) punt 8) en is expliciet uitgesloten van de RAG-index. |
 
 
 <a id="sec-c2"></a>
@@ -925,11 +926,9 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
     samensmelten); (d) bepaalde type's (`rule`, `definition`, `procedure`, ...) zijn altijd
     precies ÉÉN chunk, nooit gesplitst of samengevoegd; (e) een losse filter verwijdert
     "degenerate" chunks (minder dan 2 alfabetische woorden — paginanummers, kale opsommingstekens)
-    vóórdat ze de RAG-index bereiken. **Nog niet gestart** — gezien de huidige kennisbank-schaal
-    (21 documenten, ~390 chunks) is dit bewust geen blokkerende prioriteit geweest (zie
-    [G.17](#sec-g17) voor de twee lagere-moeite fixes die WEL al zijn doorgevoerd: PyMuPDF i.p.v.
-    pdfplumber, en de perplexity-gebaseerde chunk-kwaliteitscontrole), maar wordt waardevoller
-    naarmate de kennisbank groeit.
+    vóórdat ze de RAG-index bereiken. **OPGELOST, zie [G.18](#sec-g18)** — volledig overgenomen
+    van Auto Pilot (niet opnieuw ontworpen), inclusief een nieuw `"probleem"`-STANDALONE-type
+    voor genummerde kennisitems.
 19. **Het logboek zelf (Track 2) is nog GEEN RAG-bron voor de Adviseur** (gedeeltelijk al
     gesignaleerd in [Deel E](#deel-e) stap 6, hier expliciet herhaald en aangescherpt op verzoek
     van de gebruiker): **de 14 jaar (2013–2026) aan eigen, handgeschreven logboekregels zijn een
@@ -1485,3 +1484,84 @@ Resultaat, empirisch bevestigd met een vóór/na-vergelijking:
 **Afhankelijkheid toegevoegd**: `pymupdf` (vervangt `pdfplumber` in `requirements.txt`),
 `transformers`/`torch` nu ook expliciet vermeld (al transitief aanwezig via
 `sentence-transformers`, nu ook rechtstreeks gebruikt door de kwaliteitscontrole).
+
+<a id="sec-g18"></a>
+## G.18 RAG-chunker vervangen door Auto Pilot's sectie/topic-boundary-aanpak + 200-probleem-kennisbank
+
+**Aanleiding**: de gebruiker leverde een nieuw, eigen samengesteld kennisdocument aan
+(`Data/Orchard/OrchardKnowledge/internet_crawl/Kersenteelt 100 problemen door het jaar
+heen.md`, Jan Scholtes): **200 genummerde praktijkproblemen**, elk in een vast
+Observatie/Actie/Gevolg/Waarom/Slechtste-reactie-format (zie [Deel F](#deel-f) #14, exact het
+Observation-Action-Consequence-Why/Worst-case-patroon) met per-probleem bronvermelding en een
+eerlijke "bevestigd"/"deels bevestigd"/"nog geen bron gevonden"-labeling per claim. Eerste
+poging: dit document gewoon door de bestaande woordenteller-chunker (`CHUNK_MAX_WORDS=220`)
+halen — **fout gebleken**, want de gebruiker wees er direct op: een los probleem komt soms net
+boven de 220 woorden uit, waardoor de packer een probleem MIDDENIN zijn eigen tekst afkapte en
+het vervolg (inclusief de bij dát probleem horende bronnenregel) in het VOLGENDE chunk
+belandde — het risico dat een bron bij het verkeerde probleem komt te staan. De gebruiker was
+hier scherp en terecht over: "dan hostaan de verkeerde bronnen bij de verkeerde problemen"
+en gaf de opdracht niet een eigen, ad-hoc regex-fix te verzinnen, maar letterlijk Auto Pilot's
+eigen, al-werkende chunker over te nemen.
+
+**Volledige herbouw, gekopieerd van Auto Pilot (niet opnieuw ontworpen)**:
+- `core/text_segmentation.py` uitgebreid met Auto Pilot's volledige topic-boundary-toolkit
+  (near-verbatim overgenomen): `split_sentences()`, `cosine_similarities()`, `depth_scores()`
+  (Hearst 1997 TextTiling, aangepast van bag-of-words naar zinsembeddings — dezelfde aanpak als
+  LangChain's SemanticChunker/LlamaIndex's SemanticSplitterNodeParser/GraphSeg), `percentile()`,
+  `semantic_split_sentence_indices()` (adaptieve percentiel-drempel + absolute
+  minimum-depth-score om ruis op korte/eentonige teksten niet als "topic shift" te zien).
+- `pipeline/ingest/parse_orchard_documents.py` volledig herzien: elk document levert nu een
+  lijst **secties** (niet langer losse pagina's) — `{"section_id", "title", "type", "text",
+  "pages"}`. PDF → één `"prose"`-sectie per pagina; HTML → één `"prose"`-sectie voor het hele
+  document; Markdown → splitst eerst op `## `-koppen (groepsniveau), en detecteert BINNEN elke
+  groep een genuine reeks genummerde `**N. Titel**`-items (minimaal 3 treffers, anders blijft
+  het gewoon één `"prose"`-sectie — voorkomt dat een incidenteel vetgedrukt zinnetje verkeerd
+  wordt herkend). Elk gevonden item wordt een eigen **STANDALONE**-sectie met `type="probleem"`
+  — exact Auto Pilot's `STANDALONE_TYPES`-mechanisme (daar `"rule"`/`"chirp_report"`/
+  `"moos_case"`), hier hernoemd naar het eigen domein.
+- `pipeline/ingest/build_orchard_rag.py` volledig herschreven rond
+  `pipeline.ingest.parse_orchard_documents.STANDALONE_SECTION_TYPES`: een `"prose"`-sectie mag
+  eerst op topic-boundary gesplitst worden (`_split_section_by_topic`, nooit voor STANDALONE),
+  dan indien nog te lang verder op zinsgrens (`_split_oversized_section`), en vervolgens worden
+  kleine, verwante buursecties samengevoegd tot een token-budget
+  (`CHUNK_TARGET_TOKENS=400`/`CHUNK_MAX_TOKENS=500`/`CHUNK_MIN_TOKENS=40`, Auto Pilot's eigen
+  defaults overgenomen), geblokkeerd door een adaptieve ondergrens op de
+  boundary-embedding-gelijkenis (`MERGE_FLOOR_PERCENTILE=25.0`) — maar een STANDALONE-sectie
+  (`"probleem"`) wordt NOOIT gesplitst of samengevoegd, wat ook de vorm van zijn tekst is. Twee
+  bewuste, gedocumenteerde vereenvoudigingen t.o.v. Auto Pilot: (1) geen "hoofdstukken"-laag
+  (Orchard-documenten zijn niet hoofdstuk-gestructureerd — de adaptieve samenvoeg-drempel wordt
+  over het hele document berekend, equivalent aan Auto Pilot's "één hoofdstuk"-geval), (2) geen
+  keyword-topic-Jaccard-poort op samenvoegingen (Auto Pilot's domeinen hebben een opgebouwde
+  concept-/topic-tagging-infrastructuur die dit project nog niet heeft, zie
+  [Deel F](#deel-f) #16 — de adaptieve embedding-gelijkenis-drempel doet in de tussentijd al het
+  meeste semantische-samenhang-werk).
+- `pipeline/orchard_rag.py`: `format_context()`/`format_sources()` aangepast van een los
+  `page_num`-veld naar een `pages`-lijst (een samengevoegd chunk kan nu over meerdere pagina's
+  lopen) — rendert "p.2", "p.2-4" (aaneengesloten reeks) of "p.2, 5" (niet-aaneengesloten).
+
+**Resultaat, geverifieerd**:
+- Het 200-probleem-document levert nu **exact 201 chunks** (200 STANDALONE `"probleem"`-chunks
+  + 1 `"prose"`-chunk voor de inleiding) — elk probleem precies ÉÉN chunk, met zijn EIGEN
+  bronvermelding altijd correct erbij, nooit gesplitst of vermengd met een buurprobleem
+  (automatisch geverifieerd: 0 van de 200 "probleem"-chunks bevat meer dan 1 sectie).
+- Kennisbank-index van 383 → 644 chunks (22 documenten totaal, inclusief het nieuwe document).
+- Hernieuwde perplexity-kwaliteitscontrole ([G.17](#sec-g17)) bevestigt: geen kolom-
+  interleaving-garbage meer aanwezig; de resterende hoogst-scorende chunks zijn nu losse, korte
+  maar grammaticaal correcte zinsfragmenten (een bekende, acceptabele makke van perplexiteit-
+  op-korte-tekst, geen inhoudelijke fout) — 12 extra, zuiver-ruis HTML-chrome-chunks (cookie-
+  banners, winkelwagen-besturing, fruit-categorie-navigatiemenu's, opnieuw gevonden met de
+  nieuwe chunk-id's) expliciet uitgesloten via `EXCLUDED_CHUNK_IDS`.
+- Een volledige end-to-end test (`ask_orchard_advisor()` op "Mijn perceel ligt in een
+  vorstgat...") retourneerde een correct, groen-gegrond antwoord dat letterlijk de juiste
+  bronnen van probleem #1 citeerde (NIAB/Alabama Extension/Michigan State) — bevestigt de hele
+  keten (parsen → sectie-structuur → STANDALONE-chunking → retrieval → promptopbouw → antwoord)
+  werkt zoals bedoeld.
+- Herhaalde retrieval-test op alle tien oorspronkelijke praktijkonderwerpen ([G.16](#sec-g16))
+  bevestigt geen regressie — elk onderwerp scoort nog steeds (sterk) positief met de juiste
+  bron, en drie extra, zeer specifieke testvragen uit het nieuwe document ("perceel ligt in een
+  vorstgat", "stikstoftekort", "wortelknobbel agrobacterium") scoren alle drie de juiste,
+  exacte probleem-chunk als nummer 1 resultaat.
+- Testsuite uitgebreid: `tests/test_build_orchard_rag.py` volledig herschreven (fake-embedder-
+  patroon, zelfde techniek als Auto Pilot's eigen `test_build_rag_chunking.py`, geen echt model
+  nodig in de geautomatiseerde suite), nieuw `tests/test_parse_orchard_documents.py` voor de
+  markdown-structuurdetectie. 184 tests totaal, allemaal groen.

@@ -110,11 +110,9 @@
     "url": "https://biofruitnet.eu/wp-content/uploads/2023/04/70a.-PA_Zwarte-kersenluis-Beheersing-in-de-biologische-teelt-van-zoete-kers_NL.pdf",
     "language": "nl",
     "note": "Zelfde EU Horizon 2020 BIOFRUITNET-reeks als de al-aanwezige onderstammen-factsheet -- directe, Nederlandstalige herkenning/beheersing van Myzus cerasi.",
-    "status": "acquired",
+    "status": "already_acquired",
     "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\wur_groenkennisnet\\biofruitnet_zwarte_kersenluis_nl.pdf",
-    "sha256": "59bf307b0b0f5ca83dfa7674156678aa5d19044f8e3d5da65332ded22e84d0bf",
-    "size_bytes": 391635,
-    "acquired_at": "2026-10-09T00:25:16.187554+00:00"
+    "sha256": "59bf307b0b0f5ca83dfa7674156678aa5d19044f8e3d5da65332ded22e84d0bf"
   },
   {
     "id": "biofruitnet_aanbevolen_rassen",
@@ -123,11 +121,9 @@
     "url": "https://biofruitnet.eu/wp-content/uploads/2023/04/75.PA_Zoete_kers_aanbevolen_rassen_biologische_teelt_NL.pdf",
     "language": "nl",
     "note": "Zelfde BIOFRUITNET-reeks -- rassenkeuze i.r.t. Monilia/vruchtrot-gevoeligheid en bestuivingscompatibiliteit (S-allelen), aanvullend op de bestuivingslijst hieronder.",
-    "status": "acquired",
+    "status": "already_acquired",
     "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\wur_groenkennisnet\\biofruitnet_aanbevolen_rassen_nl.pdf",
-    "sha256": "fa32e5aa6ea6de9c43be3a724b614b88facf62d0633265196a2fe99e8d7abb63",
-    "size_bytes": 286622,
-    "acquired_at": "2026-10-09T00:25:16.675628+00:00"
+    "sha256": "fa32e5aa6ea6de9c43be3a724b614b88facf62d0633265196a2fe99e8d7abb63"
   },
   {
     "id": "agruniekrijnvallei_pseudomonas_hagelschot",
@@ -136,11 +132,9 @@
     "url": "https://www.agruniekrijnvallei.nl/nieuwsbrief-items/nieuwsbrief-klein-en-steenfruit-25-maart-2024/pseudomonas-en-hagelschotbeheersing/",
     "language": "nl",
     "note": "Praktijkgerichte teler-nieuwsbrief van een Nederlandse landbouw-coöperatie -- bacteriekanker (Pseudomonas syringae) + hagelschotziekte herkennen en beheersen.",
-    "status": "acquired",
+    "status": "already_acquired",
     "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\teelt_praktijk\\agruniekrijnvallei_pseudomonas_hagelschot_nl.html",
-    "sha256": "4bd783132ca987cd0a209b8267f08e46dea49b377d03cb9c49ab33f55a296426",
-    "size_bytes": 81907,
-    "acquired_at": "2026-10-09T00:25:16.864693+00:00"
+    "sha256": "4bd783132ca987cd0a209b8267f08e46dea49b377d03cb9c49ab33f55a296426"
   },
   {
     "id": "baldur_bacteriekanker_kersen",
@@ -149,11 +143,9 @@
     "url": "https://www.baldur-nederland.nl/onion/content/plantendokter/steenfruit/bacteriekanker-(pseudomonas-syringae)-bij-kersen",
     "language": "nl",
     "note": "Commerciële kwekerij-plantendokterpagina -- herkenning/preventie bacteriekanker, aanvullend op de AgruniekRijnvallei-bron hierboven.",
-    "status": "acquired",
+    "status": "already_acquired",
     "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\ziekten_plagen\\baldur_bacteriekanker_kersen_nl.html",
-    "sha256": "7804f4b2b066ebe33abb080475350251990279122f753a28b0023ca671a12e91",
-    "size_bytes": 50149,
-    "acquired_at": "2026-10-09T00:25:17.171852+00:00"
+    "sha256": "7804f4b2b066ebe33abb080475350251990279122f753a28b0023ca671a12e91"
   },
   {
     "id": "fruitbomen_net_hagelschotziekte",
@@ -162,11 +154,9 @@
     "url": "https://fruitbomen.net/informatie/ziekten-en-plagen/ziekten/hagelschotziekte",
     "language": "nl",
     "note": "Nederlandstalige fruitbomen-encyclopedie, vrij toegankelijk -- herkenning/bestrijding hagelschotziekte (Stigmina carpophila, samenhangend met bacteriekanker).",
-    "status": "acquired",
+    "status": "already_acquired",
     "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\ziekten_plagen\\fruitbomen_net_hagelschotziekte_nl.html",
-    "sha256": "6d03f8f342ba587dd4341a53c21aad8f122d5fe472b0c109fb4bacc5e23d760e",
-    "size_bytes": 76120,
-    "acquired_at": "2026-10-09T00:25:17.324812+00:00"
+    "sha256": "6d03f8f342ba587dd4341a53c21aad8f122d5fe472b0c109fb4bacc5e23d760e"
   },
   {
     "id": "fruitbomen_net_bladvlekkenziekte",
@@ -175,11 +165,9 @@
     "url": "https://fruitbomen.net/informatie/ziekten-en-plagen/ziekten/bladvlekkenziekte-kers",
     "language": "nl",
     "note": "Zelfde encyclopedie -- Blumeriella jaapii-bladvlekkenziekte, vroegtijdige bladval.",
-    "status": "acquired",
+    "status": "already_acquired",
     "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\ziekten_plagen\\fruitbomen_net_bladvlekkenziekte_nl.html",
-    "sha256": "057262da43b680ded48e870b1fda4d1b8f8e960fc91c208e235a38bf2eb60402",
-    "size_bytes": 76880,
-    "acquired_at": "2026-10-09T00:25:17.458885+00:00"
+    "sha256": "057262da43b680ded48e870b1fda4d1b8f8e960fc91c208e235a38bf2eb60402"
   },
   {
     "id": "organic_farmknowledge_bladvlekkenziekte",
@@ -188,11 +176,9 @@
     "url": "https://organic-farmknowledge.org/nl/tool/56835",
     "language": "nl",
     "note": "EU-gefinancierd biologische-landbouw-kennisplatform (vergelijkbaar niveau als BIOFRUITNET) -- praktijk-'tool'-pagina specifiek voor biologische teelt.",
-    "status": "acquired",
+    "status": "already_acquired",
     "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\ziekten_plagen\\organic_farmknowledge_bladvlekkenziekte_nl.html",
-    "sha256": "02d25ac1f8a3ff4e1f52b6b788624c4f8e0b93a191f166170a9b889d7212ccd6",
-    "size_bytes": 39548,
-    "acquired_at": "2026-10-09T00:25:17.798938+00:00"
+    "sha256": "02d25ac1f8a3ff4e1f52b6b788624c4f8e0b93a191f166170a9b889d7212ccd6"
   },
   {
     "id": "bayer_monilia_vruchtrot",
@@ -201,11 +187,9 @@
     "url": "https://www.cropscience.bayer.be/nl/ziekten-onkruiden-insecten/ziekten/monilia-vruchtrot",
     "language": "nl",
     "note": "Commercieel (Bayer CropScience) -- herkenning/levenscyclus Monilinia laxa/fructigena. Niet als onafhankelijk onderzoeksinstituut citeren, alleen als aanvullende herkenning.",
-    "status": "acquired",
+    "status": "already_acquired",
     "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\ziekten_plagen\\bayer_monilia_vruchtrot_nl.html",
-    "sha256": "d98bd6c4946b20f8ddd56dd7363f6be1e9280c14a8722a96a9eb9a26955eda92",
-    "size_bytes": 90798,
-    "acquired_at": "2026-10-09T00:25:17.950740+00:00"
+    "sha256": "d98bd6c4946b20f8ddd56dd7363f6be1e9280c14a8722a96a9eb9a26955eda92"
   },
   {
     "id": "koppert_monilinia_bruinrot",
@@ -214,11 +198,9 @@
     "url": "https://www.koppert.be/ziektebestrijding/monilinia-or-brown-rot-of-fruit/",
     "language": "nl",
     "note": "Commercieel (Koppert Biological Systems) -- biologische-bestrijding-invalshoek op Monilia, aanvullend op de Bayer-bron hierboven.",
-    "status": "acquired",
+    "status": "already_acquired",
     "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\ziekten_plagen\\koppert_monilinia_bruinrot_nl.html",
-    "sha256": "1f2173bc77d46808bfef67e5010c07ddc13fe3ea9e443ec785caf88965f30d29",
-    "size_bytes": 118831,
-    "acquired_at": "2026-10-09T00:25:18.223682+00:00"
+    "sha256": "1f2173bc77d46808bfef67e5010c07ddc13fe3ea9e443ec785caf88965f30d29"
   },
   {
     "id": "bayer_kersenluis_zwarte",
@@ -227,11 +209,9 @@
     "url": "https://agro.bayer.nl/diagnose/plagen/kersenluis-zwarte",
     "language": "nl",
     "note": "Commercieel (Bayer) -- herkenning/schadebeeld zwarte kersenluis, aanvullend op de BIOFRUITNET-factsheet hierboven.",
-    "status": "acquired",
+    "status": "already_acquired",
     "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\ziekten_plagen\\bayer_kersenluis_zwarte_nl.html",
-    "sha256": "209b5d4b23656a257f6c29f02137c75b96a27edc765faafb05ae34f0d3ff5186",
-    "size_bytes": 71624,
-    "acquired_at": "2026-10-09T00:25:18.371194+00:00"
+    "sha256": "209b5d4b23656a257f6c29f02137c75b96a27edc765faafb05ae34f0d3ff5186"
   },
   {
     "id": "puurvantveld_kersenvlieg",
@@ -240,11 +220,9 @@
     "url": "https://www.puurvantveld.eu/Kersenvlieg",
     "language": "nl",
     "note": "Nederlandstalige pagina specifiek over Rhagoletis cerasi (kersenvlieg, NIET suzuki-fruitvlieg) -- herkenning + gele vangplaten/feromoonvallen-aanpak. Commercieel (verkoopt vallen), maar herkenningsinfo is feitelijk/overeenkomend met andere bronnen.",
-    "status": "acquired",
+    "status": "already_acquired",
     "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\ziekten_plagen\\puurvantveld_kersenvlieg_nl.html",
-    "sha256": "fba0496385c56d2e8de7c9c81e77fc77ab95e26cce5af570e218ea8c36e1a29a",
-    "size_bytes": 609097,
-    "acquired_at": "2026-10-09T00:25:19.207713+00:00"
+    "sha256": "fba0496385c56d2e8de7c9c81e77fc77ab95e26cce5af570e218ea8c36e1a29a"
   },
   {
     "id": "fruitsecurityholland_vogelschade",
@@ -253,11 +231,9 @@
     "url": "https://www.fruitsecurityholland.com/nl/hoe-bescherm-ik-mijn-fruit-tegen-vogels/l526c13",
     "language": "nl",
     "note": "Commercieel (vogelnetten-leverancier) -- praktische vogelschade-beheersing (netten/frames/maaswijdte), onderwerp dat verder nergens in de kennisbank voorkwam.",
-    "status": "acquired",
+    "status": "already_acquired",
     "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\teelt_praktijk\\fruitsecurityholland_vogelschade_nl.html",
-    "sha256": "8baa001f9cfa186d44aa5f7ee0ac392403a9341afff90711cd9278be65978d48",
-    "size_bytes": 71323,
-    "acquired_at": "2026-10-09T00:25:19.431408+00:00"
+    "sha256": "8baa001f9cfa186d44aa5f7ee0ac392403a9341afff90711cd9278be65978d48"
   },
   {
     "id": "oosteromkersen_nachtvorst",
@@ -266,11 +242,9 @@
     "url": "https://www.oosterom-kersen.nl/nachtvorst-bestrijding/",
     "language": "nl",
     "note": "Van een ECHTE Nederlandse kersenteler zelf (geen leverancier/onderzoeksinstituut) -- vorstberegening/ijslaag-mechanisme in de eigen praktijk, dicht bij de doelgroep-toon die dit project nastreeft.",
-    "status": "acquired",
+    "status": "already_acquired",
     "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\teelt_praktijk\\oosteromkersen_nachtvorst_nl.html",
-    "sha256": "a7e149340de9a374f5f21f30888cb8f5f717d8238795b52599993eee8adb4a39",
-    "size_bytes": 35421,
-    "acquired_at": "2026-10-09T00:25:19.676940+00:00"
+    "sha256": "a7e149340de9a374f5f21f30888cb8f5f717d8238795b52599993eee8adb4a39"
   },
   {
     "id": "bomenenzo_bestuivingslijst_kersenboom",
@@ -279,10 +253,19 @@
     "url": "https://www.bomenenzo.nl/bestuivingslijst-kersenboom",
     "language": "nl",
     "note": "Kwekerij-bron -- praktische bestuivingscompatibiliteit (zelffertiel/kruisbestuiving, bloeitijd-afstemming) tussen kersenrassen, onderwerp dat verder nergens voorkwam.",
-    "status": "acquired",
+    "status": "already_acquired",
     "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\teelt_praktijk\\bomenenzo_bestuivingslijst_kersenboom_nl.html",
-    "sha256": "153d5c1a019435fe8425b2fa75b80125e254a5ca44812794bca422d53edac41b",
-    "size_bytes": 658001,
-    "acquired_at": "2026-10-09T00:25:20.117778+00:00"
+    "sha256": "153d5c1a019435fe8425b2fa75b80125e254a5ca44812794bca422d53edac41b"
+  },
+  {
+    "id": "kersenteelt_100_problemen_jaar_internet_crawl",
+    "title": "Kersenteelt: 100 problemen door het jaar heen (eigen samenstelling, internet-crawl)",
+    "category": "internet_crawl",
+    "url": null,
+    "language": "nl",
+    "note": "Door de gebruiker zelf samengesteld/gecrawld overzicht (Jan Scholtes, 2026-10-09): ~139 problemen verspreid over het teeltjaar, elk in het vaste Observatie/Actie/Gevolg/Waarom/Slechtste-reactie-format (zie design doc Deel F #14, Observation-Action-Consequence-Why/Worst-case) met per-probleem bronvermelding (NIAB, WSU, Michigan State, UC IPM/Davis, PNW Handbooks, OMAFRA, e.a.) en een eerlijke 'bevestigd'/'deels bevestigd'/'nog geen bron gevonden'-labeling per claim -- al precies het format dat dit project voor toekomstige SFT/DPO-trainingsdata nastreeft.",
+    "status": "already_acquired",
+    "file_path": "C:\\Users\\jcsch\\Documents\\Python\\Orchard\\Data\\Orchard\\OrchardKnowledge\\internet_crawl\\Kersenteelt 100 problemen door het jaar heen.md",
+    "sha256": "29c474ca3178c47be9af7252fda6b6c95781e11941c9bed025d9a7f97e1169b1"
   }
 ]

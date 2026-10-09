@@ -121,6 +121,20 @@ def retrieve(query: str, index: RagIndex, k: int = 5, pool_n: int = 60,
     return hits[:k]
 
 
+def _format_pages(h: dict) -> str:
+    """Renders a chunk's page(s) for a citation -- "p.2", "p.2-4" for a contiguous run (a
+    merged, multi-section chunk), or "p.2, 5" for a non-contiguous set. Falls back to the
+    legacy single `page_num` field if `pages` isn't present (defensive, e.g. older test
+    fixtures)."""
+    pages = h.get("pages")
+    if not pages:
+        return f"p.{h.get('page_num', 1)}"
+    pages = sorted(pages)
+    if pages == list(range(pages[0], pages[-1] + 1)) and len(pages) > 1:
+        return f"p.{pages[0]}-{pages[-1]}"
+    return "p." + ", ".join(str(p) for p in pages)
+
+
 def format_context(hits: list[dict]) -> str:
     """Renders retrieved chunks as labelled, citable excerpts for a prompt -- mirrors Auto
     Pilot's `_format_context()` helpers in captain_agent_live.py/chief_engineer_agent_live.py."""
@@ -130,7 +144,7 @@ def format_context(hits: list[dict]) -> str:
     for j, h in enumerate(hits, 1):
         lang_note = "" if h["language"] == "nl" else " [Engelstalige bron]"
         parts.append(
-            f"[Fragment {j} -- {h['title']}{lang_note}, p.{h['page_num']}]\n{h['text']}"
+            f"[Fragment {j} -- {h['title']}{lang_note}, {_format_pages(h)}]\n{h['text']}"
         )
     return "\n\n".join(parts)
 
@@ -144,5 +158,5 @@ def format_sources(hits: list[dict]) -> list[str]:
         if h["doc_id"] in seen:
             continue
         seen.add(h["doc_id"])
-        out.append(f"{h['title']} (p.{h['page_num']})" + (f" -- {h['url']}" if h.get("url") else ""))
+        out.append(f"{h['title']} ({_format_pages(h)})" + (f" -- {h['url']}" if h.get("url") else ""))
     return out

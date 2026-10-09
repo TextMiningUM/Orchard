@@ -334,6 +334,24 @@ SOURCES: list[SourceSpec] = [
         note="Kwekerij-bron -- praktische bestuivingscompatibiliteit (zelffertiel/kruisbestuiving, "
              "bloeitijd-afstemming) tussen kersenrassen, onderwerp dat verder nergens voorkwam.",
     ),
+    # -- Fase 5 (2026-10-09): eigen samenstelling van de gebruiker, al op schijf aanwezig
+    # (geen URL om op te halen -- url=None, maar build_corpus() valt netjes terug op
+    # "already_acquired" zodra het bestand al bestaat, dus geen aparte statuswaarde nodig).
+    SourceSpec(
+        id="kersenteelt_100_problemen_jaar_internet_crawl",
+        title="Kersenteelt: 100 problemen door het jaar heen (eigen samenstelling, internet-crawl)",
+        category="internet_crawl",
+        url=None,
+        filename="Kersenteelt 100 problemen door het jaar heen.md",
+        language="nl", status="to_fetch",
+        note="Door de gebruiker zelf samengesteld/gecrawld overzicht (Jan Scholtes, 2026-10-09): "
+             "~139 problemen verspreid over het teeltjaar, elk in het vaste "
+             "Observatie/Actie/Gevolg/Waarom/Slechtste-reactie-format (zie design doc Deel F #14, "
+             "Observation-Action-Consequence-Why/Worst-case) met per-probleem bronvermelding "
+             "(NIAB, WSU, Michigan State, UC IPM/Davis, PNW Handbooks, OMAFRA, e.a.) en een eerlijke "
+             "'bevestigd'/'deels bevestigd'/'nog geen bron gevonden'-labeling per claim -- al "
+             "precies het format dat dit project voor toekomstige SFT/DPO-trainingsdata nastreeft.",
+    ),
 ]
 
 
@@ -373,6 +391,15 @@ def build_corpus(knowledge_dir: Path) -> list[dict]:
             row.update({"status": "already_acquired", "file_path": str(dest), "sha256": _sha256(dest)})
             manifest.append(row)
             print(f"[skip, already on disk] {src.id} -> {dest}")
+            continue
+
+        if src.url is None:
+            # Locally-authored/pre-crawled source (no single fetchable URL by design, e.g. the
+            # user's own "internet_crawl" compilation) -- there is nothing to download, so a
+            # missing file here is a real problem (moved/renamed/deleted), not a "blocked" source.
+            row.update({"status": "failed", "error": f"no url to fetch and file missing: {dest}"})
+            manifest.append(row)
+            print(f"[FAILED] {src.id}: expected local file not found at {dest}")
             continue
 
         try:
