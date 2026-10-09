@@ -5,7 +5,8 @@ begonnen als zuiver ontwerp (Deel A-F, 2026-10-08) vóórdat er één regel impl
 geschreven — analoog aan hoe `design_captain_missions.md` en `design_chief_engineer.md` in het
 Auto Pilot-project zijn opgezet (zie `C:\Users\jcsch\Documents\Python\Auto Pilot`). Sindsdien is een
 aanzienlijk deel van Fase 0-3 van de roadmap ([Deel E](#deel-e)) daadwerkelijk gebouwd, getest en
-gedeployed (lokaal + een publieke read-only cloud-demo) — zie **[Deel G — Implementatiestatus](#deel-g)**
+gedeployed (lokaal + een publieke cloud-demo, zie [G.1](#sec-g1) voor de recente wijziging naar
+niet-langer-read-only) — zie **[Deel G — Implementatiestatus](#deel-g)**
 voor het volledige, chronologische verslag van wat er werkelijk staat, inclusief architectuurkeuzes
 die afweken van dit oorspronkelijke ontwerp (met name: **Qwen3-8B in plaats van Mistral** als
 basismodel, zie [B.7](#sec-b7) en [G.4](#sec-g4)). Deel A-F blijven de oorspronkelijke ontwerptekst,
@@ -976,12 +977,15 @@ Deel A-F zelf ook bijgewerkt met een verwijzing hierheen.
   ML-stack geïnstalleerd: `torch` (cu128), `transformers`, `peft`, `trl`, `bitsandbytes`, later
   aangevuld met `sentence-transformers`/`pdfplumber`/`beautifulsoup4`/`lxml` voor de RAG-pipeline
   (torch bleef ongemoeid — pip zag de al-geïnstalleerde versie als voldoende, geen herdownload nodig).
-- **Publieke read-only deployment**: nginx reverse-proxy (poort 80/443 → Streamlit's interne 8501),
-  twee systemd-services (`orchard-streamlit`, `orchard-qwen`) zodat beide overleven na
-  SSH-disconnect/reboot. De schrijfbare Logboek-Verifiëren-pagina is op de pod uitgeschakeld door het
-  bestand te hernoemen naar `_6_Logboek_Verifieren.py.disabled` (Streamlit negeert bestanden die met
-  `_` beginnen — geen code verwijderd, alleen onzichtbaar voor de publieke pagina-navigatie) en de
-  database-file is `chmod 444` gezet.
+- **Publieke deployment**: nginx reverse-proxy (poort 80/443 → Streamlit's interne 8501), twee
+  systemd-services (`orchard-streamlit`, `orchard-qwen`) zodat beide overleven na
+  SSH-disconnect/reboot. De schrijfbare Logboek-Verifiëren-pagina stond aanvankelijk uitgeschakeld
+  op de pod (bestand hernoemd naar `_6_Logboek_Verifieren.py.disabled`, database-file `chmod 444`)
+  zodat de publieke demo read-only was. **Op expliciet verzoek van de gebruiker (2026-10-09)
+  heractiveerd**: bestand teruggezet naar `6_Logboek_Verifieren.py`, database `chmod 664` —
+  de publieke pod is dus niet langer read-only; iedereen met de link kan nu de originele scans
+  bekijken en de database bewerken. Terugdraaien kan door dezelfde stappen in omgekeerde
+  volgorde uit te voeren (zie `.github/copilot-instructions.md`).
 - **HTTPS**: geen eigen domein beschikbaar, dus `sslip.io` gebruikt (`45-135-57-59.sslip.io` resolvet
   automatisch naar dat IP) om een Let's Encrypt-certificaat te kunnen aanvragen via certbot — werkend
   HTTPS + HTTP→HTTPS-redirect + automatische renewal-timer.
