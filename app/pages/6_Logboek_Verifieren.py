@@ -20,7 +20,13 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from orchard_common import PATHS, get_logbook_conn, render_sidebar, render_weather_dialog_button  # noqa: E402
+from orchard_common import (  # noqa: E402
+    PATHS,
+    get_logbook_conn,
+    render_sidebar,
+    render_weather_dialog_button,
+    resolve_logbook_image_path,
+)
 
 import pandas as pd
 import streamlit as st
@@ -110,7 +116,8 @@ col_img, col_form = st.columns([1, 1])
 
 with col_img:
     st.subheader(f"Bron: {entry['bestand']}, pagina {entry['pagina']}")
-    if entry["image_path"] and Path(entry["image_path"]).exists():
+    resolved_image_path = resolve_logbook_image_path(entry["image_path"])
+    if resolved_image_path and resolved_image_path.exists():
         rot_key, zoom_key, fit_key = f"rotate_{entry_id}", f"zoom_{entry_id}", f"fit_{entry_id}"
         rotation = st.session_state.get(rot_key, 0)
         fit_to_width = st.session_state.get(fit_key, True)
@@ -141,7 +148,7 @@ with col_img:
 
         try:
             from PIL import Image
-            pil_img = Image.open(entry["image_path"])
+            pil_img = Image.open(resolved_image_path)
             if rotation:
                 # PIL rotates counter-clockwise for positive angles -- negate so the
                 # "+90°" button visually rotates clockwise.
@@ -155,7 +162,10 @@ with col_img:
         except Exception as exc:
             st.error(f"Kon afbeelding niet verwerken (rotatie/zoom): {exc}")
     else:
-        st.warning(f"Scan-afbeelding niet gevonden op: {entry['image_path']}")
+        st.warning(
+            f"Scan-afbeelding niet gevonden. Opgeslagen pad: `{entry['image_path']}`"
+            + (f" -- afgeleid pad op deze machine: `{resolved_image_path}`" if resolved_image_path else "")
+        )
     st.text_area("Ruwe transcriptie (ter referentie, read-only)", entry["raw_transcript"] or "", height=120, disabled=True)
 
 with col_form:

@@ -89,6 +89,7 @@ Bronnen voor dit ontwerp:
   - [G.16 Fase 4: gerichte kennisbank-uitbreiding (10 praktijkproblemen) + retrieval-afstelling](#sec-g16)
   - [G.17 PDF-parseerfix (PyMuPDF) + automatische RAG-chunk-kwaliteitscontrole](#sec-g17)
   - [G.18 RAG-chunker vervangen door Auto Pilot's sectie/topic-boundary-aanpak + 200-probleem-kennisbank](#sec-g18)
+  - [G.19 Logboek-scans niet zichtbaar op de pod: absoluut pad gefixt + Verifiëren-pagina heractiveerd](#sec-g19)
 
 ---
 
@@ -1569,3 +1570,36 @@ eigen, al-werkende chunker over te nemen.
   patroon, zelfde techniek als Auto Pilot's eigen `test_build_rag_chunking.py`, geen echt model
   nodig in de geautomatiseerde suite), nieuw `tests/test_parse_orchard_documents.py` voor de
   markdown-structuurdetectie. 184 tests totaal, allemaal groen.
+
+<a id="sec-g19"></a>
+## G.19 Logboek-scans niet zichtbaar op de pod: absoluut pad gefixt + Verifiëren-pagina heractiveerd
+
+**Twee gerelateerde, maar los opgeloste problemen** rond de Logboek Verifiëren-pagina
+(zie ook [G.1](#sec-g1) voor de heractivatie van de pagina zelf op de publieke pod):
+
+1. **De Verifiëren-pagina ontbrak in het menu op de pod** — bleek geen bug, maar de oorspronkelijke,
+   bewuste "publieke demo is read-only"-keuze ([G.1](#sec-g1)/[G.13](#sec-g13)): het bestand stond
+   als `_6_Logboek_Verifieren.py.disabled` (Streamlit negeert bestanden die met `_` beginnen) en de
+   database was `chmod 444`. Op expliciet verzoek van de gebruiker heractiveerd (zie [G.1](#sec-g1)
+   voor de precieze stappen en hoe terug te draaien).
+2. **Nadat de pagina weer zichtbaar was, bleken de originele scan-afbeeldingen zelf niet te laden**
+   op de pod (wel lokaal) — een apart, dieperliggend probleem. Oorzaak: de `image_path`-kolom in
+   `orchard_logbook.db` bevat een ABSOLUUT pad dat ooit eenmalig is weggeschreven tijdens de
+   OCR/vision-transcriptie-stap, altijd op Windows uitgevoerd (bv.
+   `C:/Users/jcsch/Documents/Python/Orchard/Data/Orchard/OrchardLogbooks/_raw_page_images/
+   jaar_2013/page_01.png`) — dat exacte pad lost alleen op DIE ene machine op. Twee aparte fixes
+   nodig:
+   - **Code**: nieuwe gedeelde helper `app/orchard_common.py::resolve_logbook_image_path()` --
+     behoudt alleen het deel van het opgeslagen pad vanaf de `_raw_page_images`-marker en voegt
+     dat weer samen onder DEZE machine's eigen `PATHS.logbooks_dir`, ongeacht Windows- (`\`) of
+     POSIX-paden (`/`) in de opgeslagen string en ongeacht welke machine het pad oorspronkelijk
+     wegschreef. Puur een lees-tijd-normalisatie, geen database-herbouw nodig. 5 nieuwe unit
+     tests (`tests/test_orchard_common.py`).
+   - **Data**: `Data/Orchard/OrchardLogbooks/_raw_page_images/` (39 MB, 179 bestanden) is
+     GITIGNORED (eigen scans, zie [G.13](#sec-g13)) en stond daardoor realiter nog niet op de
+     pod — alleen de database zelf was ooit gesynchroniseerd. Handmatig tar+scp'd, zelfde
+     werkwijze als de database-sync zelf. **Les voor volgende keren**: een gitignored map wordt
+     door geen enkel automatisch mechanisme gesignaleerd als "ontbreekt op de pod" — dit moet
+     bij elke pod-sync expliciet gecontroleerd worden, niet aangenomen.
+   - Geverifieerd met een screenshot op de publieke pod: de originele handgeschreven
+     logboekpagina (jaar 2013, pagina 1) is nu daadwerkelijk zichtbaar.

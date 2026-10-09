@@ -19,6 +19,7 @@ if str(_WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKSPACE_ROOT))
 
 import json
+import re
 import sqlite3
 
 from core.paths import AgentPaths  # noqa: E402
@@ -55,6 +56,29 @@ def load_settings() -> dict:
 def save_settings(settings: dict) -> None:
     SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_FILE.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def resolve_logbook_image_path(raw_path: str | None) -> Path | None:
+    """The logbook database's `image_path` column was written once with an ABSOLUTE path from
+    wherever the OCR/vision-transcriptie-stap oorspronkelijk draaide (altijd Windows, zie
+    `Data/Orchard/OrchardLogbooks/_transcripts/*.json`) -- dat exacte pad lost alleen op DIE
+    ene machine op. Elke andere machine (bv. de cloud-pod, Linux) heeft hetzelfde scanbestand
+    onder een ANDERE absolute root nodig (ontdekt doordat de scans op de pod niet zichtbaar
+    waren terwijl ze lokaal wel werkten). Leidt een draagbaar pad af door alleen het deel vanaf
+    `_raw_page_images` te behouden en dat opnieuw samen te voegen onder DEZE machine's eigen
+    `PATHS.logbooks_dir` -- werkt ongeacht welke machine het pad oorspronkelijk wegschreef, en
+    ongeacht Windows (`\\`) vs POSIX (`/`) padscheidingstekens in de opgeslagen string. Returns
+    ``None`` if the marker isn't found at all (defensive fallback for an unexpected format)."""
+    if not raw_path:
+        return None
+    marker = "_raw_page_images"
+    parts = re.split(r"[\\/]", raw_path)
+    if marker not in parts:
+        return None
+    tail = parts[parts.index(marker) + 1:]
+    if not tail:
+        return None
+    return PATHS.logbooks_dir / marker / Path(*tail)
 
 
 def get_logbook_conn(st):
