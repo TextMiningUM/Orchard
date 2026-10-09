@@ -23,6 +23,11 @@ def test_format_context_empty_hits():
     assert "geen relevante" in format_context([]).lower()
 
 
+def test_format_context_shows_the_section_so_a_card_is_identifiable():
+    hits = [{**_hit("a", "Gids", [4], text="Observatie: iets."), "heading_path": ["Gids", "Groep", "21. Nachtvorst tijdens de bloei"]}]
+    assert "sectie: Groep > 21. Nachtvorst tijdens de bloei" in format_context(hits)
+
+
 def test_format_context_labels_english_sources():
     hits = [_hit("a", "English Doc", [1], text="Some text.", language="en")]
     ctx = format_context(hits)

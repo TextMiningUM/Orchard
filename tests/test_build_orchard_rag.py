@@ -1,201 +1,91 @@
-"""Tests for pipeline/ingest/build_orchard_rag.py's chunker, including the embedding-based
-topic-boundary detection ported from Auto Pilot's build_rag.py (design doc Deel F #18/G.18).
-
-Uses a FAKE embedding model + tokenizer (no sentence-transformers model load, no GPU/network)
--- per project test conventions, mock any model call. The fake embedder maps a sentence to one
-of two orthogonal directions purely by keyword presence, so topic shifts are deterministic and
-don't depend on a real model's actual semantics (same technique Auto Pilot's own
-test_build_rag_chunking.py uses).
-"""
+"""Tests for pipeline.ingest.build_orchard_rag: the index is built ONLY from QC-passed chunks of the
+structured JSON (fake embedder, no model download)."""
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
+
 import numpy as np
-import pytest
 
-from pipeline.ingest import build_orchard_rag
-
-
-class _FakeTokenizer:
-    def encode(self, text: str, add_special_tokens: bool = False) -> list[str]:
-        return text.split()
+from pipeline.ingest import build_orchard_rag as br
 
 
-class _FakeModel:
-    """2D fake embedder: 'monilia' -> [1, 0], 'kevers' -> [0, 1], anything else -> [0.7, 0.7]
-    (all L2-normalized), so two keyword-distinguished "topics" are deterministically
-    orthogonal-ish and everything else is a neutral middle ground."""
-
-    def get_sentence_embedding_dimension(self) -> int:
-        return 2
-
-    def encode(self, texts, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False):
-        vecs = []
-        for t in texts:
-            low = t.lower()
-            if "monilia" in low:
-                v = np.array([1.0, 0.0])
-            elif "kevers" in low:
-                v = np.array([0.0, 1.0])
-            else:
-                v = np.array([0.7, 0.7])
-            vecs.append(v / np.linalg.norm(v))
-        return np.array(vecs)
+def _doc(doc_id="d1", chunks=None):
+    return {"doc_id": doc_id, "title": "Gids", "category": "cat", "language": "nl", "url": "https://x.nl",
+            "source_file": "a.pdf", "source_type": "pdf", "chunks": chunks or []}
 
 
-@pytest.fixture(autouse=True)
-def _fake_embedder(monkeypatch):
-    monkeypatch.setattr(build_orchard_rag, "model", _FakeModel())
-    monkeypatch.setattr(build_orchard_rag, "tokenizer", _FakeTokenizer())
+def _chunk(cid, verdict, text="Een complete zin over monilia.", ctype="prose"):
+    chunk = {"chunk_id": cid, "title": "Monilia", "heading_path": ["Gids", "Monilia"], "type": ctype,
+             "pages": [2, 3], "text": text, "text_with_context": f"Bron: Gids\nSectie: Gids > Monilia\n\n{text}",
+             "word_count": 5, "table_ids": [], "figure_ids": []}
+    if verdict:
+        chunk["qc"] = {"verdict": verdict}
+    return chunk
 
 
-def _section(section_id: str, text: str, section_type: str = "prose", pages=None) -> dict:
-    return {"section_id": section_id, "title": section_id, "type": section_type,
-            "text": text, "pages": pages or [1]}
+def _write(tmp_path, *docs):
+    for doc in docs:
+        (tmp_path / f"{doc['doc_id']}.json").write_text(json.dumps(doc), encoding="utf-8")
 
 
-def _doc(sections: list[dict], doc_id: str = "doc1") -> dict:
-    return {
-        "doc_id": doc_id, "title": "Test Document", "category": "test", "language": "nl",
-        "url": "https://example.com/test", "source_file": "test.pdf", "sections": sections,
-    }
+def test_only_ok_and_warn_chunks_are_indexed(tmp_path):
+    _write(tmp_path, _doc(chunks=[_chunk("a", "ok"), _chunk("b", "warn"), _chunk("c", "fail"),
+                                  _chunk("d", "references"), _chunk("e", None)]))
+    records, stats = br.load_indexable_chunks(tmp_path)
+    assert [r["chunk_id"] for r in records] == ["a", "b", "e"]  # no QC record yet counts as indexable
+    assert stats["chunks_total"] == 5 and stats["chunks_indexed"] == 3
+    assert stats["excluded"] == {"fail": 1, "references": 1}
 
 
-# ── _split_section_by_topic ────────────────────────────────────────────────────────────
-def test_splits_a_section_that_internally_drifts_topic():
-    section = _section("s1", (
-        "Monilia tast de bloesem aan in het voorjaar. Monilia veroorzaakt bloesemsterfte. "
-        "Monilia-sporen verspreiden zich via de wind. Kevers vreten gaatjes in jonge vruchten. "
-        "Kevers zijn actief vanaf mei. Kevers overwinteren in de grond."
-    ))
-    pieces = build_orchard_rag._split_section_by_topic(section)
-    assert len(pieces) == 2
-    assert "monilia" in pieces[0]["text"].lower()
-    assert "kevers" in pieces[1]["text"].lower()
-    assert pieces[0]["semantic_split"] is True
-    assert pieces[0]["section_id"] == "s1_t1"
-    assert pieces[1]["section_id"] == "s1_t2"
+def test_index_record_keeps_document_title_for_citations_and_section_title_separately():
+    record = br.to_index_record(_doc(), _chunk("a", "ok"))
+    assert record["title"] == "Gids" and record["section_title"] == "Monilia"
+    assert record["section_titles"] == ["Monilia"] and record["types"] == ["prose"]
+    assert record["page_num"] == 2 and record["language"] == "nl" and record["url"] == "https://x.nl"
+    assert record["text_with_context"].startswith("Bron: Gids")
 
 
-def test_does_not_split_a_standalone_type_section_even_with_a_real_topic_shift():
-    # "probleem" is in STANDALONE_TYPES -- must stay one complete, unsplit retrieval unit
-    # even with the exact same detectable topic shift as the "prose" test above. This is
-    # the guarantee that keeps one numbered item's own sources from drifting onto a
-    # neighbouring item.
-    section = _section("s1", (
-        "Monilia tast de bloesem aan in het voorjaar. Monilia veroorzaakt bloesemsterfte. "
-        "Monilia-sporen verspreiden zich via de wind. Kevers vreten gaatjes in jonge vruchten. "
-        "Kevers zijn actief vanaf mei. Kevers overwinteren in de grond."
-    ), section_type="probleem")
-    pieces = build_orchard_rag._split_section_by_topic(section)
-    assert pieces == [section]
+def test_embed_texts_applies_the_passage_prefix():
+    seen = []
+
+    class FakeModel:
+        def encode(self, texts, **kwargs):
+            seen.extend(texts)
+            return np.ones((len(texts), 3))
+
+    out = br.embed_texts(FakeModel(), ["a", "b"], prefix="passage: ")
+    assert seen == ["passage: a", "passage: b"] and out.dtype == np.float32 and out.shape == (2, 3)
 
 
-def test_does_not_split_a_section_with_too_few_sentences():
-    section = _section("s1", "Monilia komt vaak voor. Kevers soms ook.")
-    pieces = build_orchard_rag._split_section_by_topic(section)
-    assert pieces == [section]
+def test_main_writes_chunks_embeddings_ids_and_meta(tmp_path, monkeypatch):
+    json_dir, cache_dir = tmp_path / "json", tmp_path / "cache"
+    json_dir.mkdir()
+    _write(json_dir, _doc(chunks=[_chunk("a", "ok"), _chunk("b", "fail")]))
+    monkeypatch.setattr(br.AgentPaths, "orchard", classmethod(lambda cls: SimpleNamespace(json_dir=json_dir, cache_dir=cache_dir)))
+
+    class FakeModel:
+        max_seq_length = 128
+
+        def __init__(self, *a, **k):
+            pass
+
+        def encode(self, texts, **kwargs):
+            return np.ones((len(texts), 4))
+
+    import sentence_transformers
+    monkeypatch.setattr(sentence_transformers, "SentenceTransformer", FakeModel)
+    assert br.main(["--embedder", "intfloat/multilingual-e5-large", "--max-seq-length", "256"]) == 0
+    assert json.loads((cache_dir / "orchard_rag_chunk_ids.json").read_text()) == ["a"]
+    assert np.load(cache_dir / "orchard_rag_embeddings.npy").shape == (1, 4)
+    meta = json.loads((cache_dir / "orchard_rag_meta.json").read_text())
+    assert meta["embedder"] == "intfloat/multilingual-e5-large" and meta["query_prefix"] == "query: "
+    assert meta["excluded_by_qc"] == {"fail": 1}
 
 
-def test_does_not_split_a_single_topic_section():
-    section = _section("s1", (
-        "Monilia tast de bloesem aan in het voorjaar. Monilia veroorzaakt bloesemsterfte. "
-        "Monilia-sporen verspreiden zich via de wind en regen. Monilia overwintert in "
-        "vruchtmummies. Monilia-infecties nemen toe bij vochtig weer. Monilia is de "
-        "belangrijkste oorzaak van bloesemsterfte bij kersen."
-    ))
-    pieces = build_orchard_rag._split_section_by_topic(section)
-    assert len(pieces) == 1
-
-
-# ── chunk_document: embedding-based merge-blocking + STANDALONE isolation ──────────────
-def test_chunk_document_blocks_a_merge_across_a_real_topic_shift():
-    doc = _doc([
-        _section("s1", "Monilia komt dit jaar vroeg voor in de boomgaard."),
-        _section("s2", "Monilia-bestrijding is het belangrijkst tijdens de bloei."),
-        _section("s3", "Kevers worden dit jaar in grote aantallen waargenomen."),
-        _section("s4", "Kevers bestrijden kan het beste vroeg in het seizoen."),
-    ])
-    chunks = build_orchard_rag.chunk_document(doc)
-    section_id_groups = [c["section_ids"] for c in chunks]
-    # s1+s2 (monilia/monilia) and s3+s4 (kevers/kevers) should each merge; s2+s3 must NOT.
-    assert ["s1", "s2"] in section_id_groups
-    assert ["s3", "s4"] in section_id_groups
-
-
-def test_chunk_document_never_merges_a_standalone_probleem_section_with_a_neighbour():
-    doc = _doc([
-        _section("s1", "Monilia komt dit jaar vroeg voor in de boomgaard.", section_type="probleem"),
-        _section("s2", "Monilia-bestrijding is het belangrijkst tijdens de bloei.", section_type="probleem"),
-    ])
-    chunks = build_orchard_rag.chunk_document(doc)
-    assert len(chunks) == 2
-    assert chunks[0]["section_ids"] == ["s1"]
-    assert chunks[1]["section_ids"] == ["s2"]
-
-
-def test_contains_semantic_split_flag_propagates_to_the_chunk():
-    long_mixed_text = (
-        "Monilia tast de bloesem aan in het voorjaar. Monilia veroorzaakt bloesemsterfte. "
-        "Monilia-sporen verspreiden zich via de wind. Kevers vreten gaatjes in jonge vruchten. "
-        "Kevers zijn actief vanaf mei. Kevers overwinteren in de grond."
-    )
-    doc = _doc([_section("s1", long_mixed_text)])
-    chunks = build_orchard_rag.chunk_document(doc)
-    assert any(c["contains_semantic_split"] for c in chunks)
-
-
-# ── degenerate-chunk filter ─────────────────────────────────────────────────────────────
-def test_is_degenerate_chunk_text_drops_near_empty_fragments():
-    assert build_orchard_rag._is_degenerate_chunk_text("BMP") is True
-    assert build_orchard_rag._is_degenerate_chunk_text("10") is True
-    assert build_orchard_rag._is_degenerate_chunk_text("\u2022") is True
-    assert build_orchard_rag._is_degenerate_chunk_text("Planning") is True
-
-
-def test_is_degenerate_chunk_text_keeps_real_sentences():
-    assert build_orchard_rag._is_degenerate_chunk_text("Monilia komt vaak voor bij kersen.") is False
-    assert build_orchard_rag._is_degenerate_chunk_text("34. Bladvlekkenziekte (Blumeriella)") is False
-
-
-def test_chunk_document_drops_degenerate_sections():
-    doc = _doc([
-        # "probleem" (STANDALONE) so it can never merge into the next section -- isolates
-        # the degenerate-filter behavior from the separate merge-decision logic.
-        _section("s1", "BMP", section_type="probleem"),
-        _section("s2", "Monilia komt dit jaar vroeg voor in de boomgaard."),
-    ])
-    chunks = build_orchard_rag.chunk_document(doc)
-    assert len(chunks) == 1
-    assert "Monilia" in chunks[0]["text"]
-
-
-def test_chunk_document_excludes_hardcoded_junk_chunk_ids(monkeypatch):
-    doc = _doc([_section("s1", "Monilia komt dit jaar vroeg voor in de boomgaard.")])
-    chunks = build_orchard_rag.chunk_document(doc)
-    assert len(chunks) == 1
-    monkeypatch.setattr(build_orchard_rag, "EXCLUDED_CHUNK_IDS", {chunks[0]["chunk_id"]})
-    assert build_orchard_rag.chunk_document(doc) == []
-
-
-# ── stable_chunk_id ─────────────────────────────────────────────────────────────────────
-def test_stable_chunk_id_deterministic_and_unique():
-    a = build_orchard_rag.stable_chunk_id("doc1", 0, "tekst een")
-    b = build_orchard_rag.stable_chunk_id("doc1", 0, "tekst een")
-    c = build_orchard_rag.stable_chunk_id("doc1", 1, "tekst twee")
-    assert a == b
-    assert a != c
-    assert a.startswith("doc1_")
-
-
-# ── end-to-end: one probleem per chunk (the user's core requirement) ───────────────────
-def test_chunk_document_produces_one_chunk_per_numbered_item():
-    doc = _doc([
-        _section("s1", "**1. Monilia**\n\n- Observatie: ...\n\n* Bronnen: A.", section_type="probleem"),
-        _section("s2", "**2. Kevers**\n\n- Observatie: ...\n\n* Bronnen: B.", section_type="probleem"),
-        _section("s3", "**3. Vorst**\n\n- Observatie: ...\n\n* Bronnen: C.", section_type="probleem"),
-    ])
-    chunks = build_orchard_rag.chunk_document(doc)
-    assert len(chunks) == 3
-    for i, c in enumerate(chunks, start=1):
-        assert c["n_sections"] == 1
-        assert f"s{i}" in c["section_ids"]
+def test_main_refuses_to_build_without_indexable_chunks(tmp_path, monkeypatch):
+    json_dir = tmp_path / "json"
+    json_dir.mkdir()
+    _write(json_dir, _doc(chunks=[_chunk("a", "fail")]))
+    monkeypatch.setattr(br.AgentPaths, "orchard", classmethod(lambda cls: SimpleNamespace(json_dir=json_dir, cache_dir=tmp_path / "c")))
+    assert br.main([]) == 1

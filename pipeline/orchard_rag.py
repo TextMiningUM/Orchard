@@ -24,7 +24,8 @@ from sentence_transformers import CrossEncoder, SentenceTransformer
 
 from core.paths import AgentPaths
 
-EMBEDDER_MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+EMBEDDER_MODEL = "BAAI/bge-m3"  # 8192-token window (used at 512), multilingual; see design doc G.25
+EMBEDDER_MAX_SEQ_LENGTH = 512
 RERANKER_MODEL = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
 
 RAG_MAX_PER_DOCUMENT = 3  # avoid one long document crowding out every other source in top-k
@@ -35,12 +36,14 @@ class RagIndex:
     reranker. Build once via `load_index()`, reuse across many `retrieve()` calls."""
 
     def __init__(self, embedder: SentenceTransformer, embeddings: np.ndarray,
-                 chunk_ids: list[str], chunks: list[dict], reranker: CrossEncoder | None):
+                 chunk_ids: list[str], chunks: list[dict], reranker: CrossEncoder | None,
+                 query_prefix: str = ""):
         self.embedder = embedder
         self.embeddings = embeddings
         self.chunk_ids = chunk_ids
         self.chunk_by_id = {c["chunk_id"]: c for c in chunks}
         self.reranker = reranker
+        self.query_prefix = query_prefix
 
     @property
     def n_chunks(self) -> int:
@@ -50,11 +53,12 @@ class RagIndex:
 _INDEX: RagIndex | None = None
 
 
-def load_index(paths: AgentPaths | None = None, use_reranker: bool = True) -> RagIndex | None:
+def load_index(paths: AgentPaths | None = None, use_reranker: bool = False) -> RagIndex | None:
     """Lazily loads and memoizes the RAG index. Returns None (never raises) if the index hasn't
     been built yet -- callers should degrade to "no RAG context available" rather than crash,
     same posture as `pipeline/orchard_tools.py`'s stubs returning clear errors instead of fake
-    data."""
+    data. The embedder (and its query prefix) is the one recorded in ``orchard_rag_meta.json`` by
+    ``build_orchard_rag.py``, so queries are always embedded with the model the index was built with."""
     global _INDEX
     if _INDEX is not None:
         return _INDEX
@@ -69,15 +73,18 @@ def load_index(paths: AgentPaths | None = None, use_reranker: bool = True) -> Ra
     chunks = json.loads(chunks_path.read_text(encoding="utf-8"))
     embeddings = np.load(emb_path)
     chunk_ids = json.loads(ids_path.read_text(encoding="utf-8"))
-    embedder = SentenceTransformer(EMBEDDER_MODEL, device="cpu")
+    meta_path = cache_dir / "orchard_rag_meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+    embedder = SentenceTransformer(meta.get("embedder", EMBEDDER_MODEL), device="cpu")
+    embedder.max_seq_length = int(meta.get("max_seq_length") or EMBEDDER_MAX_SEQ_LENGTH)
     reranker = CrossEncoder(RERANKER_MODEL, device="cpu") if use_reranker else None
 
-    _INDEX = RagIndex(embedder, embeddings, chunk_ids, chunks, reranker)
+    _INDEX = RagIndex(embedder, embeddings, chunk_ids, chunks, reranker, meta.get("query_prefix", ""))
     return _INDEX
 
 
 def _dense_search(index: RagIndex, query: str, pool_n: int) -> list[tuple[str, float]]:
-    q_emb = index.embedder.encode([query], convert_to_numpy=True, normalize_embeddings=True)[0]
+    q_emb = index.embedder.encode([index.query_prefix + query], convert_to_numpy=True, normalize_embeddings=True)[0]
     sims = index.embeddings @ q_emb  # both normalized -> dot product == cosine similarity
     top = np.argsort(-sims)[:pool_n]
     return [(index.chunk_ids[i], float(sims[i])) for i in top]
@@ -110,7 +117,8 @@ def retrieve(query: str, index: RagIndex, k: int = 5, pool_n: int = 60,
     well under a second on CPU) but meaningfully improves recall for narrow/single-source topics."""
     dense_hits = _dense_search(index, query, pool_n)
     if rerank and index.reranker is not None:
-        pairs = [(query, index.chunk_by_id[cid]["text"]) for cid, _ in dense_hits]
+        pairs = [(query, index.chunk_by_id[cid].get("text_with_context") or index.chunk_by_id[cid]["text"])
+                 for cid, _ in dense_hits]
         scores = index.reranker.predict(pairs)
         ranked = sorted(zip([cid for cid, _ in dense_hits], scores), key=lambda t: -t[1])
     else:
@@ -143,8 +151,10 @@ def format_context(hits: list[dict]) -> str:
     parts = []
     for j, h in enumerate(hits, 1):
         lang_note = "" if h["language"] == "nl" else " [Engelstalige bron]"
+        path = h.get("heading_path") or []
+        section = f", sectie: {' > '.join(path[-2:])}" if len(path) > 1 else ""
         parts.append(
-            f"[Fragment {j} -- {h['title']}{lang_note}, {_format_pages(h)}]\n{h['text']}"
+            f"[Fragment {j} -- {h['title']}{lang_note}{section}, {_format_pages(h)}]\n{h['text']}"
         )
     return "\n\n".join(parts)
 

@@ -92,6 +92,11 @@ Bronnen voor dit ontwerp:
   - [G.19 Logboek-scans niet zichtbaar op de pod: absoluut pad gefixt + Verifiëren-pagina heractiveerd](#sec-g19)
   - [G.20 Menu-volgorde herschikt naar logische groepering](#sec-g20)
   - [G.21 Inference-snelheid: migratie naar vLLM (AWQ), streaming, adaptieve thinking-budget](#sec-g21)
+  - [G.22 Gouden eval-set + meetharnas (retrieval hit@k, grounding, latency) en de eerste baseline](#sec-g22)
+  - [G.23 Documenten → gestructureerde JSON → chunk-definitie in de JSON (Auto Pilot's OOW/VHF-aanpak)](#sec-g23)
+  - [G.24 Chunk-kwaliteitscontrole (QC) als poort voor RAG/KG/PG + knop "Controleer RAG Chunks"](#sec-g24)
+  - [G.25 RAG herbouwd uit de gestructureerde JSON: bge-m3, geen reranker](#sec-g25)
+  - [G.26 Procedure: hoe we RAG bouwen en QC doen, en de Code Library](#sec-g26)
 
 ---
 
@@ -719,11 +724,14 @@ Orchard/                                    (GitHub: https://github.com/TextMini
 │       │   ├── orchard_logbook.db         ← SQLite: pages/entries/toepassingen (487/1063 rijen)
 │       │   ├── _transcripts/*.json        ← ruwe visuele-transcriptie-tussenresultaten
 │       │   └── _raw_page_images/          ← gerenderde scans (91 PNG's)
-│       ├── Orchard_JSON/                  ← GITIGNORED, regenereerbaar: geparste Track 1-documenten
-│       │   (per-document JSON, output van parse_orchard_documents.py)
-│       ├── Orchard_Agents_Training/       ← GITIGNORED, regenereerbaar: RAG-index
-│       │   (orchard_rag_chunks.json, orchard_rag_embeddings.npy, orchard_rag_chunk_ids.json)
-│       ├── Orchard_Eval/                  ← held-out gold Q&A + scenario's (NOG NIET aangemaakt)
+│       ├── Orchard_JSON/                  ← GITIGNORED, regenereerbaar: gestructureerde Track 1-documenten
+│       │   (per-document JSON met chapters/sections/blocks/tables/figures/chunks + qc, zie G.23/G.24;
+│       │   gemaakt door build_orchard_json.py + orchard_qc.py; _qc_report.md = laatste QC-rapport)
+│       ├── Orchard_Agents_Training/       ← GITIGNORED, regenereerbaar: RAG-index (+ later KG/PG)
+│       │   (orchard_rag_chunks.json, orchard_rag_embeddings.npy, orchard_rag_chunk_ids.json;
+│       │   ALLEEN chunks met QC-oordeel ok/warn, zie G.24)
+│       ├── Orchard_Eval/                  ← held-out gouden set (orchard_gold_qa.json, GETRACKT, zie G.22);
+│       │   └── _runs/                     ← GITIGNORED: resultaten van pipeline/run_orchard_eval.py
 │       └── orchard_settings.json          ← GITIGNORED: persisted lat/lon/adres (echte boomgaardlocatie)
 ├── _models/
 │   ├── hf_cache/                          ← gedeeld, GITIGNORED
@@ -750,6 +758,8 @@ Orchard/                                    (GitHub: https://github.com/TextMini
 │   ├── orchard_phenology_spec.py          ← deterministische kern (koude-uren/GDD/vorst/suzukii/barst)
 │   ├── orchard_tools.py                   ← Open-Meteo/Buienradar/geocoding/Ctgb-stub/bodem-stub
 │   ├── orchard_rag.py                     ← RAG-retrieval + reranking (Fase 3)
+│   ├── orchard_eval.py                    ← eval-bibliotheek: hit@k/MRR, feitendekking, guardrail, latency (G.22)
+│   ├── run_orchard_eval.py                ← CLI: python -m pipeline.run_orchard_eval [--answers] [--no-rerank]
 │   ├── orchard_tool_catalog.py            ← ReACT-tool-catalogus voor de chatbot
 │   ├── orchard_agent.py                   ← ask_orchard_advisor() (RAG+ReACT+CoT)
 │   ├── orchard_patterns.py                ← meerjaren-patroonherkenning (Patroonherkenning-pagina)
@@ -760,8 +770,11 @@ Orchard/                                    (GitHub: https://github.com/TextMini
 │   └── ingest/
 │       ├── build_logbook_database.py      ← Track 2: OCR-transcripten -> SQLite
 │       ├── build_orchard_corpus.py        ← Track 1: downloaden + manifest.json
-│       ├── parse_orchard_documents.py     ← Track 1: PDF/HTML -> genormaliseerd JSON
-│       └── build_orchard_rag.py           ← Track 1: chunken + embedden -> RAG-index
+│       ├── build_orchard_json.py          ← Track 1: PDF/HTML/MD -> gestructureerde JSON + chunk-definitie (G.23)
+│       ├── orchard_structure.py           ← pure structuurlogica: secties, chunks, tabel/figuur-scheiding (G.23)
+│       ├── orchard_qc.py                  ← chunk-QC (zinnen/OCR/tabellen/paginagrenzen) + repair (G.24)
+│       ├── parse_orchard_documents.py     ← VERVALLEN (vervangen door build_orchard_json.py; nog te verwijderen)
+│       └── build_orchard_rag.py           ← Track 1: embedden van de QC-geslaagde JSON-chunks -> RAG-index
 ├── cloud/
 │   └── qwen_inference_server.py           ← localhost-only Qwen3-8B-server (poort 8811) op de pod
 ├── tests/                                 ← 139 tests (pytest), zie G.11
@@ -808,9 +821,12 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
    [G.6](#sec-g6)) — de daadwerkelijke DPO-trainingsronde zelf volgt later, zodra er genoeg paren zijn.
 8. **Streamlit-dashboard v0**: alleen het Boomgaard Dashboard + Chat-pagina. — ✅ **GEDAAN, en ver
    voorbij v0**: 10 pagina's totaal, zie [B.9](#sec-b9)/[G.10](#sec-g10).
-9. **Evaluatie + ablaties**: pas zinvol zodra stap 1–7 staan. — ⬜ **NOG NIET GESTART** (geen gouden
-   eval-set, zie [Deel F](#deel-f) punt 5/9); 139 UNIT-tests bestaan wel (zie [G.11](#sec-g11)), maar
-   dat is iets anders dan een agronomische kwaliteits-evaluatie.
+9. **Evaluatie + ablaties**: pas zinvol zodra stap 1–7 staan. — 🟡 **GESTART** (2026-10-09): gouden
+   eval-set van 83 vragen + meetharnas + eerste baseline staan ([G.22](#sec-g22)); nog te doen:
+   volledige antwoord-evaluatie (`--answers`, vraagt de Qwen-server) als nulmeting, en de
+   herhaalmeting na de RAG-herbouw uit de gestructureerde JSON ([G.23](#sec-g23)/[G.24](#sec-g24)).
+   139 → 240 UNIT-tests bestaan ook (zie [G.11](#sec-g11)), maar dat is iets anders dan een
+   agronomische kwaliteits-evaluatie.
 
 ---
 
@@ -936,7 +952,21 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
     "degenerate" chunks (minder dan 2 alfabetische woorden — paginanummers, kale opsommingstekens)
     vóórdat ze de RAG-index bereiken. **OPGELOST, zie [G.18](#sec-g18)** — volledig overgenomen
     van Auto Pilot (niet opnieuw ontworpen), inclusief een nieuw `"probleem"`-STANDALONE-type
-    voor genummerde kennisitems.
+    voor genummerde kennisitems. **Bleek daarna nog steeds te simpel** (PDF = nog steeds één sectie
+    per pagina, HTML = één sectie voor de héle pagina, geen kop-/tabel-/figuurdetectie, token-budget-
+    samenvoegen = quasi-vaste lengte): tweede ronde, zie [G.23](#sec-g23) (structuur-JSON zoals
+    Auto Pilot's OOW/VHF-parsers) en [G.24](#sec-g24) (QC-poort).
+20. **Kapotte chunks repareren (backlog, bewust uitgesteld).** De QC ([G.24](#sec-g24)) keurt chunks af
+    die geen complete zinnen bevatten (afgebroken zinnen, tabellen/figuurtekst, OCR-ruis,
+    pagina-/kolomresten, bibliografie). Die blijven in de JSON staan (met reden + `text_raw`) maar
+    gaan NIET naar RAG/KG/PG. Het meeste verlies zit in de gescande USDA-handbook (OCR-boek, 2
+    kolommen) en de WUR-/BIOFRUITNET-tabellen. Toekomstig werk: parser per document verbeteren
+    (tabellen als gestructureerde `tables` met eigen opzoek-tool, kolomvolgorde, voorzichtige
+    OCR-correctie met audit-spoor), QC opnieuw draaien — wat dan slaagt doet vanzelf mee.
+21. **Embedder kapt af op 128 tokens — OPGELOST, zie [G.25](#sec-g25).** `paraphrase-multilingual-mpnet-base-v2`
+    heeft `max_seq_length=128`; in de oude index waren 506 van de 644 chunks langer. Vervangen door
+    `BAAI/bge-m3` (meertalig, 512 tokens in gebruik): hit@6 95% / MRR 0,92 zonder reranker (was 87% /
+    0,81 mét reranker).
 19. **Het logboek zelf (Track 2) is nog GEEN RAG-bron voor de Adviseur** (gedeeltelijk al
     gesignaleerd in [Deel E](#deel-e) stap 6, hier expliciet herhaald en aangescherpt op verzoek
     van de gebruiker): **de 14 jaar (2013–2026) aan eigen, handgeschreven logboekregels zijn een
@@ -1746,3 +1776,227 @@ en `assess_grounding()` ving daarbij terecht een geval op waarin het model een
 basismodel-gedrag — geen regressie, zie Deel F #12). 198/198 tests groen, inclusief een
 nieuwe `tests/test_vraag_de_adviseur_page.py`-AppTest-smoke-check (eerste voor deze pagina)
 en nieuwe unit tests voor `_needs_deep_thinking()`/`_build_payload()`.
+
+<a id="sec-g22"></a>
+## G.22 Gouden eval-set + meetharnas en de eerste baseline
+
+**Waarom eerst dit**: zonder meting is verbeteren gokken (Deel E stap 9, volgorde in de roadmap:
+eerst eval, dan logboek-RAG, dan hybride retrieval/KG, dan SFT/DPO).
+
+- **Gouden set** `Data/Orchard/Orchard_Eval/orchard_gold_qa.json` (GETRACKT, held-out: nooit voor
+  training of prompt-afstelling): 83 vragen — 69 `kennisbank` (parafrasen van 69 van de 200
+  genummerde problemen, met verwachte bron `doc_id#probleemnr` en kernfeiten), 10 `praktijk` (de
+  tien klassieke kersenteelt-problemen, meerdere geldige bronnen) en 4 `guardrail` (mag GEEN
+  concrete dosering noemen, moet naar Ctgb/etiket verwijzen). Logboek-vragen komen pas na
+  logboek-RAG (Deel F #19) — het logboek is lokaal-only. Kernfeiten zijn alternatieven-lijsten van
+  accentloze subtekenreeksen; `validate_gold()` controleert dat elke verwachte bron bestaat én dat elk
+  kernfeit letterlijk in het verwachte bronfragment staat (de set kan dus geen feiten eisen die de bron
+  niet bevat).
+- **Harnas** `pipeline/orchard_eval.py` (+ CLI `pipeline/run_orchard_eval.py`): retrieval hit@k/MRR
+  (per categorie), gemiste vragen met top-docs, antwoord-metrics (grounding-%, feitendekking,
+  guardrail-slagingspercentage, dosering-overtredingen) en latency (gem./p50/p95). Matching is
+  lexicaal (eerlijke ondergrens, geen LLM-rechter). Ablaties: `--no-rerank`, `--no-rag`.
+  Resultaten in `Orchard_Eval/_runs/` (gitignored).
+- **Baseline oude index (644 chunks), retrieval, 79 vragen met bron**:
+
+  | Configuratie | hit@1 | hit@3 | hit@6 | MRR | latency/vraag |
+  |---|---|---|---|---|---|
+  | dense + cross-encoder-rerank (huidige instelling) | 77% | 81% | 87% | 0,81 | 3,8 s (CPU) |
+  | alleen dense | 46% | 58% | 62% | 0,52 | 0,03 s |
+
+  De reranker doet dus het zware werk; zonder hem mist dense retrieval een derde van de vragen —
+  consistent met de 128-token-afkapping van de embedder (Deel F #21). Gemiste vragen met reranker: o.a.
+  laagte/vorstgat, snoeitijd, spreeuwen, wachttijd, mestregels, residu-rapport, biologisch omschakelen.
+  De antwoord-nulmeting (`--answers`, vraagt de Qwen-server) is nog niet gedraaid.
+
+<a id="sec-g23"></a>
+## G.23 Documenten → gestructureerde JSON → chunk-definitie in de JSON
+
+**Aanleiding (gebruiker)**: de RAG-code was te simpel. Eis: documenten (PDF/HTML/MD/TXT) eerst naar
+een GOEDE JSON met de structuur van het document, en de chunks daar al in definiëren op basis van die
+structuur — pagina-breaks overslaan, tekst over twee pagina's in één chunk, GEEN gebroken chunks,
+GEEN door elkaar lopende kolommen, GEEN tabellen of grafieken in chunks, GEEN chunks van vaste
+lengte. Daarna RAG, KG én PG uit diezelfde JSON.
+
+**Onderzoek in Auto Pilot** (`../Auto Pilot`): de OOW-/VHF-/Captain-/Chief-Engineer-parsers
+(`build_oow_json.py`, `build_vhf_json.py`, `build_captain_json.py`, `build_chief_engineer_json.py`)
+zetten elke bron om in `chapters → sections` (met `type`, `pages`, `concepts`) volgens de ECHTE
+structuur (Part/Rule/Annex, kop-detectie op lettergrootte/bold), nooit een flush op een paginagrens
+(pagina = metadata), de-hyphenation op elk tekst-assemblagepunt, en een STANDALONE-type (één regel/
+één casus = één chunk) dat nooit gesplitst of samengevoegd wordt; pas daarna volgen `build_rag.py`,
+`build_kg.py` en `build_pg.py`. Orchard had dat maar half overgenomen: PDF = nog steeds één sectie per
+pagina, HTML = één sectie voor de hele pagina, geen koppen/tabellen/figuren.
+
+**Gebouwd** (`pipeline/ingest/build_orchard_json.py` + pure `orchard_structure.py`; vervangt
+`parse_orchard_documents.py`):
+- **Extractors → blokken** (heading/paragraph/list_item/caption/table/figure): PDF via PyMuPDF (niet
+  pdfplumber) met inhoudsstroom-volgorde, tabellen via `find_tables()`, figuren via afbeeldingen/
+  vector-clusters (volledige-pagina-scan-achtergrond telt niet), kop-detectie op BLOK-niveau
+  (lettergrootte t.o.v. de echte lopende-tekstgrootte, bold, bold run-in labels als "Probleem …"),
+  OCR-boeken (de gescande USDA-handbook, lettergroottes zijn ruis) via HOOFDLETTER-koppen,
+  lopende kop-/voetteksten fuzzy herkend en weggehaald, Symbol-font-bullets/zachte koppeltekens
+  genormaliseerd; HTML via semantische tags (h1–h6/p/li/table/figure), navigatie-/cookie-/link-lijsten
+  weg; Markdown via koppen + de genummerde `**N. Titel**`-kaarten (STANDALONE `probleem`). Het manifest-
+  `file_path` is een absoluut pad van de acquisitie-machine en wordt per machine opnieuw geroot
+  (`resolve_source_path`, dezelfde les als `resolve_logbook_image_path`).
+- **Structuur (`orchard_structure.py`)**: `merge_continuations` (alinea over kolom-/paginagrens = één
+  alinea; tabellen/figuren ertussen zijn transparant), `build_sections` (koptree → secties met
+  `heading_path`), `define_chunks`: een chunk is een STRUCTURELE eenheid (sectie/kaart), nooit een
+  aantal woorden. Alleen stubs (< 30 woorden) worden samengevoegd met een broer onder dezelfde
+  ouder, en alleen een sectie > 600 woorden wordt gesplitst — op topic-grens (Auto Pilot's
+  Hearst/GraphSeg-methode, nu op alineaniveau) of anders op gebalanceerde alinea-grenzen.
+- **Tabellen/figuren**: apart in `tables`/`figures` (bijschrift, sectie, pagina, rijen); chunks
+  verwijzen er alleen naar met id. Nooit in chunktekst.
+- **JSON-schema per document**: `chapters`, `sections` (met `blocks`), `tables`, `figures`, `chunks`
+  (`text`, `text_with_context`, `heading_path`, `pages`, `table_ids`, vlaggen), `quality`,
+  `parsing_notes`.
+
+**Resultaat** (eindstand 2026-10-09): 472 chunks in 21 documenten (oude index: 644; elk document één of
+meer échte structuur-eenheden), waarvan **416 door de QC** (ok 404 / warn 12), 18 afgekeurd en 38
+bibliografie. De USDA-handbook ging van 256 → 144 chunks en het aantal chunks dat midden in een zin
+begint van 55 → 1. Bij het controleren op de echte documenten zijn deze concrete oorzaken van kapotte
+chunks herkend en in de parser opgelost:
+- **Tekstgrootte-mediaan vertekend door kleine letters** (bijschriften, tabelcellen) → elke 11pt-regel leek
+  een kop; nu wordt de lopende-tekstgrootte bepaald uit meerregelige alinea's buiten tabellen/figuren,
+  en koppen worden op BLOK-niveau beoordeeld (kop-regels vóór niet-kop-regels).
+- **OCR-regels met overlappende kaders** werden tot één regel samengevoegd ("ser- rulata") → samenvoegen
+  alleen als het latere stuk rechts van het vorige aansluit.
+- **Twee-koloms gescande pagina's**: de OCR-volgorde leest de bovenste helft van beide kolommen vóór de
+  onderste helft van de linker → een zin van linksonder naar rechtsboven werd uit elkaar getrokken.
+  Nu expliciete kolomvolgorde (volledige-breedte-/gootbrekende blokken splitsen de pagina in banden).
+- **Figuurbijschriften** die midden in een alinea staan ("FIGURE 5.—…", ook als het bijschrift over
+  meerdere OCR-blokken loopt of inline in een regel begint) → bijschrift-detectie op regel- en
+  blokniveau; hun regels breken de omlopende alinea niet meer.
+- **Voetnoten, foto-nummers (PN-3067), OCR-puntjes, tabellen in een gescand boek** (geen lijnen, dus geen
+  `find_tables`): voetnoot-detectie, tabel-zones rond een "TABLE n"-bijschrift, junk-blok-filter.
+- **Alinea die een andere alinea voortzet over tussenliggende voetnoten/bijschriften heen**:
+  `merge_continuations` laat een kleine-letter-alinea aansluiten op de dichtstbijzijnde open alinea
+  (binnen 8 blokken, nooit over een kop).
+- **Drop-caps** ("T" + "he distribution"), **Wingdings-bullets**, **zachte koppeltekens**, **nul-breedte-
+  tekens**, **regelafbrekingen met koppelteken** (Engels: "long-distance" blijft staan, "contin-ued"
+  wordt "continued", via woordenboek), **bold run-in koppen** ("Probleem …").
+- **Website-chroom**: commentaar-widgets, offerte-formulieren, "Terug"/"Lees meer", tag-wolken,
+  template-placeholders, `<!doctype>`-resten, nieuws-/colofon-secties (QC-categorie `chrome`).
+- **Ontbrekende punt** bij webtekst ("… voor nieuwe infecties"): alleen de punt wordt toegevoegd bij
+  een afgeronde alinea (≥ 6 woorden, gevolgd door een nieuwe zin/kop), nooit woorden.
+Nog open: gescande-boek-chunks met OCR-fouten en tabel-/kolomresten (zie Deel F #20) en de tabellen zelf
+(bestuivingslijst, rassentabel, onderstammen): die staan wel in `tables` maar niet als zinnen in de
+index — een "tabel → zinnen"-stap is een voor de hand liggende vervolgstap.
+
+<a id="sec-g24"></a>
+## G.24 Chunk-kwaliteitscontrole (QC) als poort voor RAG/KG/PG + knop "Controleer RAG Chunks"
+
+**Eis (gebruiker)**: in de context alleen keurige, complete, afgemaakte zinnen — geen afgebroken
+zinnen, losse tekstfragmenten, tabellen, grafieken, OCR-fouten of pagina-/kolomresten; detecteren en
+inbouwen als QC.
+
+**`pipeline/ingest/orchard_qc.py`** geeft elke chunk `chunk["qc"] = {verdict, reasons, issues,
+scores}`: `ok` / `warn` (wel geïndexeerd) / `fail` / `references` (bibliografie; niet geïndexeerd).
+Signalen: zinsstructuur (aandeel woorden in complete zinnen; een chunk mag ALLEEN complete zinnen
+bevatten — begin/einde midden in een zin, onvolledige zin, dwaal-fragmenten = fail), tabel-/cijferdichtheid,
+korte fragmenten, lexicale ruis (onbekende woorden t.o.v. woordenboek + vaktermen/namen/herhaling in
+het corpus + Nederlandse samenstellingen; onmogelijke tekens zoals `ñ` in Engelse woorden),
+bibliografie-score, taalmatigheid, afbreek-restanten ("regen- kappen"), herhaalde pagina-kopteksten,
+en optioneel (`--lm`, ± 4 min CPU) per-zin taalmodel-loss (GPT-2 NL/EN; robuuste outlier via
+mediaan/MAD) voor door elkaar lopende kolommen. Zinsdetectie kent afkortingen/initialen (spp., vs.,
+M. laxa, et al.) en laat een zin die met een kleine letter begint bewust NIET aan de vorige vastplakken
+(dat ís hoe een chunk-/paginagrens door een zin eruitziet). Handmatig overrulen: `Data/Orchard/
+orchard_qc_overrides.json` per `chunk_id` (hash van de tekst → verloopt vanzelf bij tekstwijziging).
+
+**OCR-correctie met next-word prediction — bewust NIET gedaan.** Gemeten op de USDA-handbook: 5,6% van
+de woorden is "onbekend", maar vrijwel alles daarvan is legitiem (vaktermen als Mahaleb/pollinizer,
+namen als Bing/Lewelling, bibliografie-afkortingen); een taalmodel dat "corrigeert" zou juist
+goede termen/doseringen kapot maken. Daarom: breed DETECTEREN, hooguit later conservatief corrigeren
+met audit-spoor (`text_raw`).
+
+**Repair-stap** (`--repair`, standaard bij het bouwen uit de JSON): verwijdert uitsluitend wat geen
+volledige zin is aan de RANDEN van een chunk (leidende voortzetting met kleine letter, afgebroken
+slotzin) en losse labelfragmenten ("Terug", "Lees meer"). Er wordt niets herschreven of geraden; het
+origineel staat in `text_raw`, de weggehaalde stukken in `repairs`.
+
+**Beleid — één poort voor alles**: RAG, KG én PG worden uitsluitend gebouwd uit chunks met oordeel
+`ok`/`warn` (`orchard_qc.indexable()`), zodat ook de grafen automatisch schoon zijn. Kapotte teksten
+blijven in de JSON voor een volgende reparatieronde (Deel F #20); wat dan slaagt doet vanzelf mee.
+
+**Knop** op de Instellingen-pagina: "Controleer RAG Chunks" draait de QC over alle chunks van de
+LIVE index (`qc_rag_index()`; ook de oude layout met `section_titles`/`types`) en toont totalen,
+probleemtypes, per-document-tabel, elke problematische chunk met begin/einde, plus downloads (.md/.csv);
+vinkje voor de taalmodel-stage. `pyspellchecker` staat in `requirements.txt` (ook op de pod nodig).
+AppTest-smoke-check + 12 unit-tests (213 tests totaal, groen).
+
+**Metingen**: oude live index (644 chunks, met LM-stage): ok 310 / warn 23 / fail 266 / bibliografie 45
+(207 chunks met onvolledige zinnen, 205 met begin/einde midden in een zin, 45 tabel/cijferdata,
+10 OCR-ruis, 2 door elkaar lopende kolommen). Nieuwe JSON na de parser-fixes van [G.23](#sec-g23)
+(472 chunks, met LM-stage en repair): ok 404 / warn 12 / fail 18 / bibliografie 38. De 18 fails zijn
+vrijwel allemaal terecht: voorwerk/inhoudsopgave van de handbook, colofons, productlijsten van een
+webshop, tabellen. Van de woorden in geïndexeerde chunks is ± 3% weggehaald door de repair (vooral
+OCR-beschadigde zinnen en losse bijschrift-/voetnootresten in de USDA-handbook); alles staat in
+`text_raw`/`repairs`.
+
+**Repair, uitgebreid**: naast randfragmenten haalt de repair nu ook (a) zinnen met ondubbelzinnige
+OCR-schade weg (letters met een verdwaald symbool erin zoals `developn^ent`, of onmogelijke letters
+zoals `ñ` in een Engels woord) en (b) kapotte zinnen midden in een chunk zolang die een minderheid zijn
+(≤ 30%). Een "ver van een woordenboek-woord"-regel is bewust UIT: die raakt in een tuinbouwboek ook
+correcte vaktermen (disked, rotovated, Latijnse soortnamen). QC is idempotent (`reset_repairs`: de repair
+begint altijd bij de tekst zoals de parser hem gaf).
+
+**Status**: de oude RAG-index is op verzoek van de gebruiker verwijderd en opnieuw gebouwd uit de
+QC-geslaagde JSON-chunks, zie [G.25](#sec-g25). KG (`build_kg.py`-port met aliassen als hagelschot →
+Stigmina carpophila) en PG (procedurestappen uit de Observatie/Actie-kaarten) volgen en gebruiken
+dezelfde geslaagde chunks (`build_orchard_rag.load_indexable_chunks()` is de gedeelde ingang).
+`parse_orchard_documents.py`, `check_rag_chunk_quality.py` (vervangen door `orchard_qc.py`) en hun tests
+zijn verwijderd.
+
+<a id="sec-g25"></a>
+## G.25 RAG herbouwd uit de gestructureerde JSON: bge-m3, geen reranker
+
+**`pipeline/ingest/build_orchard_rag.py` herschreven**: doet zelf geen chunking meer; neemt alle chunks uit
+`Orchard_JSON/*.json` met QC-oordeel ok/warn, embedt `text_with_context` ("Bron: …\nSectie: …\n\ntekst",
+zodat een genummerde kaart op zijn titel gevonden wordt) en schrijft naast chunks/embeddings/ids ook
+`orchard_rag_meta.json` (embedder, `max_seq_length`, prefixes) — `orchard_rag.load_index()` gebruikt exact
+dezelfde embedder. `format_context()` toont nu ook de sectie ("sectie: Groep > 21. Nachtvorst …"), want de
+kaarttitel zit niet meer in de zinnen zelf. 240 tests groen (nieuw: `test_build_orchard_rag.py`,
+`test_orchard_structure.py`, `test_build_orchard_json.py`, uitgebreid `test_orchard_qc.py`).
+
+**Embedder- en reranker-keuze, gemeten met de gouden set van [G.22](#sec-g22)** (79 vragen met bron):
+
+| Configuratie | hit@1 | hit@6 | MRR | latency/vraag |
+|---|---|---|---|---|
+| OUDE index (644 chunks), mpnet + rerank | 77% | 87% | 0,81 | 3,8 s |
+| OUDE index, alleen dense | 46% | 62% | 0,52 | 0,03 s |
+| NIEUWE index (416 chunks), mpnet (128 tokens) + rerank | 65% | 75% | 0,69 | 5,1 s |
+| NIEUWE index, **bge-m3 (512 tokens), alleen dense** — gekozen | **89%** | **95%** | **0,92** | **0,07 s** |
+| NIEUWE index, bge-m3 + rerank | 82% | 92% | 0,87 | 3,6 s |
+
+Conclusies: (1) met de oude embedder werd de nieuwe, rijkere chunk-tekst juist slechter gevonden (de
+contextregel eet een deel van het 128-tokenvenster op) — dat is Deel F #21; (2) met bge-m3 haalt de
+nieuwe structuur-index de beste score tot nu toe, zonder reranker; (3) de stock-cross-encoder
+(mmarco-mMiniLM) **verslechtert** de resultaten én kost 3,5 s per vraag, dus staat standaard uit
+(`load_index(use_reranker=False)`, `run_orchard_eval --rerank` als ablatie). Eerlijke kanttekening: de
+gouden set is hier gebruikt om de configuratie te kiezen; voor een onafhankelijke meting later een
+tweede, nog nooit gebruikte set (bv. met de logboek-vragen) toevoegen. Op de pod moet bge-m3 (± 2,2 GB)
+eenmalig gedownload worden.
+
+<a id="sec-g26"></a>
+## G.26 Procedure: hoe we RAG bouwen en QC doen, en de Code Library
+
+**Procedure (volgorde is bindend)**
+1. `python -m pipeline.ingest.build_orchard_json` — bronnen (`OrchardKnowledge/` + manifest) → `Orchard_JSON/*.json`
+   (structuur, chunks, tabellen/figuren apart; zie [G.23](#sec-g23)).
+2. `python -m pipeline.ingest.orchard_qc [--lm]` (of de knop "Controleer RAG Chunks") — QC met repair (alleen weghalen);
+   elke chunk krijgt `ok`/`warn`/`fail`/`references` ([G.24](#sec-g24)).
+3. `python -m pipeline.ingest.build_orchard_rag` — index uit `load_indexable_chunks()` (alleen `ok`/`warn`), bge-m3 op
+   `text_with_context` ([G.25](#sec-g25)). KG en PG gebruiken dezelfde `load_indexable_chunks()`.
+4. `python -m pipeline.run_orchard_eval` — meten tegen de gouden set ([G.22](#sec-g22)); pas daarna conclusies trekken.
+Altijd de JSON **opnieuw bouwen** vóór je een QC-uitkomst beoordeelt (repairs staan in de JSON). Na elke nieuwe bron:
+een steekproef van de geparste tekst lezen. Gefaalde chunks blijven in de JSON; verbetert de parser, dan doen ze vanzelf mee.
+
+**Code Library** (`C:\Users\jcsch\Documents\Python\Code Library`): de parsing- en QC-procedure is generiek gemaakt en daar
+ondergebracht, mét tests en een volledige handleiding:
+- `Parsing2JSON\parsing2json\` — PDF (PyMuPDF, nooit pdfplumber/`sort=True`), DOCX, HTML, Markdown, TXT, XML, EPUB, CSV/XLSX → JSON.
+- `QC\doc_qc\` — signalen, oordelen, repair, perplexity-stage, OCR-diagnostiek (tekstlaag, next-character-model, verwarbare tekens).
+- `Docs\Parsing2JSON_en_QC.md` — principes, JSON-schema, per-formaat-aanpak, pagina-scheidingen, normalisatie, OCR-detectie en
+  -correctie (en waarom niet automatisch corrigeren), een catalogus van 67 valkuilen, werkwijze en Orchard-metingen.
+Validatie van de port: dezelfde bronnen geven met `make_topic_splitter` exact Orchard's 184 USDA-chunks; 44 + 36 tests groen.
+Orchard zelf gebruikt voorlopig nog zijn eigen modules (`build_orchard_json.py`, `orchard_qc.py`); het is een bewuste vervolgstap om
+die op de library te laten leunen als die in een eigen repo/pakket staat.

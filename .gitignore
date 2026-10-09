@@ -61,6 +61,9 @@ Docs/
 Data/Orchard/Orchard_Agents_Training/
 Data/Orchard/Orchard_JSON/
 
+# Scratch output of pipeline/run_orchard_eval.py (the gold set itself IS tracked)
+Data/Orchard/Orchard_Eval/_runs/
+
 # Sync tarballs created ad-hoc when deploying to the cloud pod -- never meant to be committed.
 sync_*.tar.gz
 
