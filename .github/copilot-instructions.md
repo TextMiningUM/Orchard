@@ -33,7 +33,7 @@ Never launch real model training on the pod's public-facing systemd services wit
 - Filenames/folders starting with `_` are skipped by Streamlit's page auto-discovery — this is the supported way to disable a page without deleting it.
 - `st.dataframe()`: plain Python `round(x, n)` is **not** sufficient to control displayed decimals — use `st.column_config.NumberColumn(format="%.1f")` per column (or `.format({...})` when passing a pandas `Styler`).
 - `use_container_width` is deprecated — use `width="stretch"` / `width="content"`.
-- `st.dialog` works (Streamlit ≥1.65 confirmed) for the shared weather popup (`app/orchard_common.py::render_weather_dialog_button`) used by both `4_Logboek.py` and `6_Logboek_Verifieren.py` — extend that shared function rather than duplicating the dialog.
+- `st.dialog` works (Streamlit ≥1.65 confirmed) for the shared weather popup (`app/orchard_common.py::render_weather_dialog_button`) used by both `5_Logboek.py` and `6_Logboek_Verifieren.py` — extend that shared function rather than duplicating the dialog.
 - `streamlit.testing.v1.AppTest` paths are resolved relative to the **calling script's location**, not cwd — a common source of false "file not found" failures in tests.
 
 ## External data sources: lessons already paid for

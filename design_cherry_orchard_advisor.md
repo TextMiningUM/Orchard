@@ -90,6 +90,7 @@ Bronnen voor dit ontwerp:
   - [G.17 PDF-parseerfix (PyMuPDF) + automatische RAG-chunk-kwaliteitscontrole](#sec-g17)
   - [G.18 RAG-chunker vervangen door Auto Pilot's sectie/topic-boundary-aanpak + 200-probleem-kennisbank](#sec-g18)
   - [G.19 Logboek-scans niet zichtbaar op de pod: absoluut pad gefixt + Verifiëren-pagina heractiveerd](#sec-g19)
+  - [G.20 Menu-volgorde herschikt naar logische groepering](#sec-g20)
 
 ---
 
@@ -491,7 +492,7 @@ illustratie van het oorspronkelijke ontwerp-idee). Exacte huidige bestandsnamen 
 | **📅 Seizoensplanning** | Fase-overzicht + brown-envelope-eventlog (vorst, hagel, plaagpiek) over het lopende seizoen | `1_Captain_Mission.py` (Mission Briefing/Log) |
 | **📖 Logboek & Geschiedenis** | Doorzoekbaar overzicht van 2013–2026 + weer-context-popup per entry | nieuw (geen directe mirror — Orchard-specifiek) |
 | **⚠️ Waarschuwingen** | Actieve/voorbije alerts (vorst tijdens bloei, regen vóór oogst, kersenvlieg-drempel) | Captain's "brown envelope" monitors |
-| **📈 Patroonherkenning** (toegevoegd 2026-10-09) | Drie lagen: (1) seizoenswaarschuwingen (wijkt het gekozen seizoen tot nu toe af van voorgaande jaren qua weer/plaagdruk/bestuivingsweer?), (2) preventieve weer-naar-ziekte-signalen (lijkt het weer van de laatste dagen op wat vroeger een uitbraak voorafging?), (3) automatisch gerangschikte meerjaren-trendpatronen + een altijd-getoonde teeltkalender — alles met doorklik naar de onderliggende logboekregels. Logica in `pipeline/orchard_patterns.py` + `pipeline/orchard_season_watch.py` + `pipeline/orchard_disease_weather_links.py` (alle drie puur, los getest), UI in `app/pages/8_Patroonherkenning.py` | nieuw (geen directe mirror — Orchard-specifiek; vergelijkbaar in geest met Chief Engineer's `KNOWN_LIMITS`/anomaliedetectie, maar dan over het eigen episodische logboek i.p.v. vaste technische drempels) |
+| **📈 Patroonherkenning** (toegevoegd 2026-10-09) | Drie lagen: (1) seizoenswaarschuwingen (wijkt het gekozen seizoen tot nu toe af van voorgaande jaren qua weer/plaagdruk/bestuivingsweer?), (2) preventieve weer-naar-ziekte-signalen (lijkt het weer van de laatste dagen op wat vroeger een uitbraak voorafging?), (3) automatisch gerangschikte meerjaren-trendpatronen + een altijd-getoonde teeltkalender — alles met doorklik naar de onderliggende logboekregels. Logica in `pipeline/orchard_patterns.py` + `pipeline/orchard_season_watch.py` + `pipeline/orchard_disease_weather_links.py` (alle drie puur, los getest), UI in `app/pages/7_Patroonherkenning.py` | nieuw (geen directe mirror — Orchard-specifiek; vergelijkbaar in geest met Chief Engineer's `KNOWN_LIMITS`/anomaliedetectie, maar dan over het eigen episodische logboek i.p.v. vaste technische drempels) |
 | **📚 Bibliotheek** (toegevoegd 2026-10-08) | Overzicht van en toegang tot de Track 1-kennisbank (download + inline PDF-voorbeeld per document), gevoed door `manifest.json` | nieuw — vergelijkbaar met hoe Chief Engineer's manual-bibliotheek wordt ontsloten, maar dan als eigen pagina i.p.v. alleen RAG-achtergrond |
 | **🧪 Gebruik van Middelen** (toegevoegd 2026-10-09) | Telt alle toegepaste middelen op (gecanonicaliseerd + gecategoriseerd: gewasbescherming schimmel/bacterie, insect/mijt, onkruid; meststof/bladvoeding; hulpstof; bestuiving; eerlijk "overig" waar onzeker), per week/maand/kwartaal/jaar, met drill-down per product. Logica in `pipeline/orchard_middelen.py` | nieuw — directe invulling van het wettelijke "spuitregister"-idee uit [B.6](#sec-b6), nu met een bruikbaar overzicht in plaats van alleen ruwe logboekregels |
 | **❓ Help** (toegevoegd 2026-10-09) | Gebruikersgerichte documentatie (geen techniek): wat elke pagina doet, hoe je 'm gebruikt, veelgestelde vragen | nieuw — Auto Pilot heeft dit niet apart; hier toegevoegd omdat de eindgebruiker (teler) geen ontwikkelaar is |
@@ -725,16 +726,16 @@ Orchard/                                    (GitHub: https://github.com/TextMini
 ├── app/                                   ← Streamlit-app
 │   ├── Home.py
 │   ├── orchard_common.py                  ← gedeelde helpers: AgentPaths, sidebar, settings, weer-popup
-│   └── pages/
+│   └── pages/                             (volgorde 2026-10-09 herschikt naar logische groepering, zie G.20)
 │       ├── 1_Boomgaard_Dashboard.py
-│       ├── 2_Vraag_de_Adviseur.py
-│       ├── 3_Seizoensplanning.py
-│       ├── 4_Logboek.py
-│       ├── 5_Waarschuwingen.py
-│       ├── 6_Logboek_Verifieren.py        (op de publieke pod: hernoemd naar `_6_...py.disabled`)
-│       ├── 7_Bibliotheek.py
-│       ├── 8_Patroonherkenning.py
-│       ├── 9_Gebruik_van_Middelen.py
+│       ├── 2_Waarschuwingen.py
+│       ├── 3_Vraag_de_Adviseur.py
+│       ├── 4_Seizoensplanning.py
+│       ├── 5_Logboek.py
+│       ├── 6_Logboek_Verifieren.py        (op de publieke pod inmiddels geactiveerd, zie G.1/G.19)
+│       ├── 7_Patroonherkenning.py
+│       ├── 8_Gebruik_van_Middelen.py
+│       ├── 9_Bibliotheek.py
 │       ├── 10_Help.py                     ← nieuw, zie G.10
 │       └── 11_Instellingen.py             ← nieuw, zie G.15 (locatie/ras/fase, uit de zijbalk gehaald)
 ├── core/
@@ -1042,7 +1043,7 @@ Deel A-F zelf ook bijgewerkt met een verwijzing hierheen.
   - *Bekende eigenaardigheid*: één logboekregel bleek een vooruitgeschreven, later doorgehaalde regel
     in het 2022-boekje te zijn voor 2023 — een voorbeeld van waarom `datum_iso` (de echte datum op de
     regel) leidend is, niet `pages.jaar` (welk fysiek boekje het is).
-- `app/pages/4_Logboek.py`: doorzoekbaar op jaar/middel/zekerheid, met een weer-contextknop per entry.
+- `app/pages/5_Logboek.py`: doorzoekbaar op jaar/middel/zekerheid, met een weer-contextknop per entry.
 - `app/pages/6_Logboek_Verifieren.py`: menselijk verificatie-werkproces met roteer-/zoomknoppen op de
   originele scan-afbeelding (uitgeschakeld op de publieke pod, zie [G.1](#sec-g1)).
 - **Weer-in-context-popup** (`app/orchard_common.py::render_weather_dialog_button`, gedeeld tussen
@@ -1155,7 +1156,7 @@ Deel A-F zelf ook bijgewerkt met een verwijzing hierheen.
   jaren, bestuiving piekt in april (bloeitijd), vruchtrot/fruitvliegen pieken in mei-juni (vlak
   voor/tijdens oogst) — allemaal agronomisch plausibel. Opvallendste los gevonden patroon: de
   dosering van Zink steeg van ~200 naar ~900 ml per toepassing.
-- UI: `app/pages/8_Patroonherkenning.py`, met drill-down naar de onderliggende logboekregels per
+- UI: `app/pages/7_Patroonherkenning.py`, met drill-down naar de onderliggende logboekregels per
   patroon.
 
 <a id="sec-g8"></a>
@@ -1194,13 +1195,13 @@ Twee aanvullende, los ontwikkelde detectielagen op dezelfde pagina:
   hulpstof, bestuiving (bijen/hommels — GEEN middel, maar wel in de `middel`-kolom beland), en
   eerlijk "overig" waar de identiteit niet zeker genoeg was (27 van 1026 toepassingen, 2,6%).
 - Telt per week/maand/kwartaal/jaar op — ml en gram worden NOOIT bij elkaar opgeteld.
-- UI: `app/pages/9_Gebruik_van_Middelen.py`, met gestapelde grafieken per categorie en drill-down per
+- UI: `app/pages/8_Gebruik_van_Middelen.py`, met gestapelde grafieken per categorie en drill-down per
   product naar de onderliggende logboekregels.
 
 <a id="sec-g10"></a>
 ## G.10 Bibliotheek, Help en overige UI-afwerking
 
-- `app/pages/7_Bibliotheek.py`: lijst van en toegang tot de Track 1-kennisbank (download +
+- `app/pages/9_Bibliotheek.py`: lijst van en toegang tot de Track 1-kennisbank (download +
   inline PDF-voorbeeld), gevoed door `manifest.json`. De historische logboeken/nieuwsbrieven staan
   hier BEWUST niet (horen bij de Logboek-pagina als doorzoekbare data, niet als losse bestandenlijst).
 - Decimalen-precisie: overal waar weer-tabellen getoond worden, expliciete
@@ -1290,7 +1291,7 @@ een volgend domein:
 ## G.14 Chat-UX: feedback/grounding, gespreksgeheugen en bewaarde chats
 
 Na de bovenstaande herschrijving van dit document zijn op "Vraag de Adviseur" nog vier met elkaar
-samenhangende features toegevoegd, allemaal in `app/pages/2_Vraag_de_Adviseur.py` +
+samenhangende features toegevoegd, allemaal in `app/pages/3_Vraag_de_Adviseur.py` +
 nieuwe/uitgebreide pipeline-modules:
 
 - **DPO-feedback (duim omhoog/omlaag)** — `pipeline/orchard_feedback.py`: elk antwoord krijgt een
@@ -1603,3 +1604,30 @@ eigen, al-werkende chunker over te nemen.
      bij elke pod-sync expliciet gecontroleerd worden, niet aangenomen.
    - Geverifieerd met een screenshot op de publieke pod: de originele handgeschreven
      logboekpagina (jaar 2013, pagina 1) is nu daadwerkelijk zichtbaar.
+
+<a id="sec-g20"></a>
+## G.20 Menu-volgorde herschikt naar logische groepering
+
+De sidebar-paginavolgorde (door Streamlit automatisch afgeleid uit het numerieke
+bestandsnaam-voorvoegsel in `app/pages/`) volgde tot nu toe puur de chronologische
+bouwvolgorde, niet een voor de teler logische gebruiksvolgorde. Op verzoek van de gebruiker
+herschikt naar een functionele groepering — **alleen bestanden hernoemd** (`git mv`, geschiedenis
+behouden), geen URL's veranderen (Streamlit's pagina-URL is de bestandsnaam ZONDER het
+numerieke voorvoegsel, dus bestaande links/bookmarks blijven werken):
+
+1. Boomgaard Dashboard — status in één oogopslag
+2. Waarschuwingen — directe vervolgvraag op de status ("en wat moet ik NU doen?")
+3. Vraag de Adviseur — interactief
+4. Seizoensplanning — kalenderreferentie
+5. Logboek — eigen geschiedenis doorzoeken
+6. Logboek Verifiëren — correctie, hoort direct bij Logboek
+7. Patroonherkenning — afgeleide analyse over het logboek
+8. Gebruik van Middelen — idem, andere invalshoek
+9. Bibliotheek — externe kennisbank (referentie, geen eigen data)
+10. Help — gebruikersdocumentatie
+11. Instellingen — meta, bewust altijd onderaan (zelfde conventie als de meeste apps)
+
+Geverifieerd: 189/189 tests, volledige 12-pagina AppTest-sweep, en een live check van de
+daadwerkelijke sidebar-volgorde op de lokale server — klopt met bovenstaande lijst. Geen
+code buiten de bestandsnamen zelf hoefde aangepast te worden (geen `st.page_link`/
+`switch_page`-aanroepen die een vast pad-met-nummer verwachten).
