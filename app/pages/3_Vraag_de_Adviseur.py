@@ -3,8 +3,9 @@
 Deterministische tool-routing (vorst/regen/koude-uren/kersenvlieg/vruchtbarsten/
 Ctgb-guardrail) blijft de eerste, betrouwbare laag -- die antwoorden zijn altijd gegrond
 op echte tool-output en worden NOOIT aan het LLM overgelaten. Voor alles daarbuiten gaat de
-vraag nu (Fase 2/3) naar `pipeline.orchard_agent.ask_orchard_advisor()`: Qwen3-8B
-(`cloud/qwen_inference_server.py` op de pod, via `pipeline.qwen_remote`) met (1) altijd een
+vraag nu (Fase 2/3) naar `pipeline.orchard_agent.ask_orchard_advisor_stream()`: Qwen3-8B-AWQ
+via vLLM (`cloud/qwen_inference_server.py` op de pod, via `pipeline.qwen_remote.stream_remote()`,
+sinds 2026-10-09 -- zie design doc Sec G.21) met (1) altijd een
 Track 1-kennisbank-zoekopdracht vooraf (dense retrieval + cross-encoder reranking, zie
 `pipeline/orchard_rag.py`), (2) een ReACT-lus waarin het model dezelfde deterministische
 tools (weer, koude-uren, vorst, suzuki, vruchtbarsten, Ctgb-guardrail) zelf mag aanroepen
@@ -32,7 +33,7 @@ from orchard_common import compute_season_snapshot, render_sidebar  # noqa: E402
 
 import streamlit as st
 
-from pipeline.orchard_agent import ask_orchard_advisor, build_history_messages  # noqa: E402
+from pipeline.orchard_agent import ask_orchard_advisor_stream, build_history_messages  # noqa: E402
 from pipeline.orchard_chats import (  # noqa: E402
     ChatSession,
     ChatTurn,
@@ -135,48 +136,30 @@ with st.sidebar:
         )
 
 
-def _ask_advisor(question: str, snapshot: dict | None) -> dict:
-    # Eerdere beurten (exclusief de net toegevoegde user-prompt van nu) als gespreksgeschiedenis,
-    # zodat vervolgvragen ("en hoe zit dat met...?") met echte context beantwoord worden i.p.v.
-    # als een volledig losse, nieuwe vraag behandeld te worden.
-    prior_turns = [(role, msg) for role, msg, _meta in st.session_state["chat_history"][:-1]]
-    history = build_history_messages(prior_turns)
-    try:
-        resp = ask_orchard_advisor(question, ctx, snapshot=snapshot, rag_index=_rag_index, history=history)
-    except (ConnectionError, RuntimeError) as exc:
-        return {
-            "answer": f"Kon het Qwen3-8B-model niet bereiken: {exc}",
-            "reasoning": "", "tool_calls": [], "sources": [], "grounding": "red",
-        }
-    answer = resp.answer
-    if resp.sources and "Bronnen:" not in answer:
-        answer += "\n\n**Bronnen:**\n" + "\n".join(f"- {s}" for s in resp.sources)
+def _disclaimer_suffix(answer: str, sources: list[str]) -> str:
+    """Appends the "Bronnen:"-footer (if not already present) and the standard untrained-model
+    disclaimer -- shared tail for both the deterministic-tool answers and the streamed LLM
+    answer, so a reloaded chat looks identical either way."""
+    if sources and "Bronnen:" not in answer:
+        answer += "\n\n**Bronnen:**\n" + "\n".join(f"- {s}" for s in sources)
     answer += (
         "\n\n*Let op: dit antwoord komt van het ongetrainde Qwen3-8B-basismodel "
         "(wel met kennisbank/RAG, nog geen SFT/DPO-training) -- controleer specifieke "
         "feiten altijd tegen de genoemde bron.*"
     )
-    return {
-        "answer": answer, "reasoning": resp.reasoning, "tool_calls": resp.tool_calls,
-        "sources": resp.sources, "grounding": resp.grounding,
-    }
+    return answer
 
 
-def _route_question(question: str) -> dict:
+def _try_deterministic_route(question: str) -> dict | None:
+    """Deterministic tool-routed answers (vorst/regen/koude-uren/kersenvlieg/vruchtbarsten/
+    Ctgb-guardrail) -- always instant, always grounded on real tool output, never the LLM.
+    Returns None if nothing matched, meaning the caller should fall back to the streamed
+    `ask_orchard_advisor_stream()` path instead."""
     q = question.lower()
     try:
         snap = compute_season_snapshot(ctx)
     except Exception as exc:
-        snap = None
-        snap_error = f"Kon geen live weerdata ophalen: {exc}"
-    else:
-        snap_error = None
-
-    def _plain(text: str, grounding: str = "green") -> dict:
-        return {"answer": text, "reasoning": "", "tool_calls": [], "sources": [], "grounding": grounding}
-
-    if snap is None:
-        return _plain(snap_error, grounding="red")
+        return _plain(f"Kon geen live weerdata ophalen: {exc}", grounding="red")
 
     if any(k in q for k in ("middel", "dosering", "toegelaten", "ctgb", "spuiten met")):
         try:
@@ -228,7 +211,11 @@ def _route_question(question: str) -> dict:
             f"({r.forecast_precip_mm_48h:.1f} mm verwacht komende 48u). Bron: {r.source_citation}"
         )
 
-    return _ask_advisor(question, snap)
+    return None
+
+
+def _plain(text: str, grounding: str = "green") -> dict:
+    return {"answer": text, "reasoning": "", "tool_calls": [], "sources": [], "grounding": grounding}
 
 
 _GROUNDING_BADGE = {
@@ -238,8 +225,11 @@ _GROUNDING_BADGE = {
 }
 
 
-def _render_assistant_message(answer: str, meta: dict, key_prefix: str) -> None:
-    st.markdown(answer)
+def _render_assistant_extras(meta: dict, answer: str, key_prefix: str) -> None:
+    """Everything BESIDES the answer text itself: CoT expander, tool-use caption, grounding
+    badge, feedback buttons. Split out from the answer markdown so the streamed path can
+    `st.write_stream()` the answer live and only call this afterwards (avoids re-rendering
+    -- and so duplicating -- text that was already streamed to the screen)."""
     if meta.get("reasoning"):
         with st.expander("Redenering (CoT)"):
             st.text(meta["reasoning"])
@@ -273,6 +263,13 @@ def _render_assistant_message(answer: str, meta: dict, key_prefix: str) -> None:
     col2.button("👎", key=f"{key_prefix}_down", help="Niet nuttig", on_click=_give_feedback, args=("rejected",))
 
 
+def _render_assistant_message(answer: str, meta: dict, key_prefix: str) -> None:
+    """Full render (answer text + extras) -- used for chat-history replay, where nothing was
+    streamed live and the complete answer is already known."""
+    st.markdown(answer)
+    _render_assistant_extras(meta, answer, key_prefix)
+
+
 for i, entry in enumerate(st.session_state["chat_history"]):
     role, msg, meta = entry
     with st.chat_message(role):
@@ -286,14 +283,35 @@ if prompt := st.chat_input("Stel een vraag, bijv. 'is er vorstrisico deze week?'
     with st.chat_message("user"):
         st.markdown(prompt)
     with st.chat_message("assistant"):
-        with st.spinner(
-            "De adviseur denkt na... (bij een vraag die niet direct door een tool wordt "
-            "beantwoord, raadpleegt het AI-model eerst de kennisbank en kan het 30-60 "
-            "seconden duren)"
-        ):
-            result = _route_question(prompt)
+        result = _try_deterministic_route(prompt)
+        if result is not None:
+            st.markdown(result["answer"])
+        else:
+            prior_turns = [(role, msg) for role, msg, _meta in st.session_state["chat_history"][:-1]]
+            history = build_history_messages(prior_turns)
+            try:
+                with st.spinner(
+                    "De adviseur denkt na... (bij een vraag die niet direct door een tool wordt "
+                    "beantwoord, raadpleegt het AI-model eerst de kennisbank, en het antwoord "
+                    "verschijnt zodra het model klaar is met redeneren)"
+                ):
+                    streamer = ask_orchard_advisor_stream(prompt, ctx, rag_index=_rag_index, history=history)
+                    st.write_stream(streamer)
+                resp = streamer.response
+                final_answer = _disclaimer_suffix(resp.answer, resp.sources)
+                result = {
+                    "answer": final_answer, "reasoning": resp.reasoning, "tool_calls": resp.tool_calls,
+                    "sources": resp.sources, "grounding": resp.grounding,
+                }
+                st.markdown(final_answer[len(resp.answer):])  # the sources/disclaimer tail, appended after the live-streamed text
+            except (ConnectionError, RuntimeError) as exc:
+                result = {
+                    "answer": f"Kon het Qwen3-8B-model niet bereiken: {exc}",
+                    "reasoning": "", "tool_calls": [], "sources": [], "grounding": "red",
+                }
+                st.markdown(result["answer"])
         result["question"] = prompt
         result["feedback"] = None
         st.session_state["chat_history"].append(("assistant", result["answer"], result))
         _save_current_chat()
-        _render_assistant_message(result["answer"], result, key_prefix=f"new_{len(st.session_state['chat_history'])}")
+        _render_assistant_extras(result, result["answer"], key_prefix=f"new_{len(st.session_state['chat_history'])}")

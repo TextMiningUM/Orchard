@@ -91,6 +91,7 @@ Bronnen voor dit ontwerp:
   - [G.18 RAG-chunker vervangen door Auto Pilot's sectie/topic-boundary-aanpak + 200-probleem-kennisbank](#sec-g18)
   - [G.19 Logboek-scans niet zichtbaar op de pod: absoluut pad gefixt + Verifiëren-pagina heractiveerd](#sec-g19)
   - [G.20 Menu-volgorde herschikt naar logische groepering](#sec-g20)
+  - [G.21 Inference-snelheid: migratie naar vLLM (AWQ), streaming, adaptieve thinking-budget](#sec-g21)
 
 ---
 
@@ -442,7 +443,11 @@ daar — in een apart, puur-Python, geen-LLM-nodig bestand ondergebracht zodra i
 
 - **Basismodel**: **Qwen3-8B** (open-weights, 4-bit NF4-kwantisatie, ~6 GB VRAM), rechtstreeks
   overgenomen van Auto Pilot se eigen `core/qwen_loader.py`/`cloud/qwen_inference_server.py` — zie
-  boven voor de reden waarom dit Mistral verving.
+  boven voor de reden waarom dit Mistral verving. **Update 2026-10-09** ([G.21](#sec-g21)): dit
+  geldt nog onveranderd voor de TRAININGSROUTE (`core/qwen_loader.py`, ongewijzigd, nodig voor
+  QLoRA's geheugenbesparing tijdens backward-passes) — de INFERENCE-server zelf is gemigreerd naar
+  vLLM met AWQ 4-bit-kwantisatie (snelheid/streaming), een apart stuk code
+  (`cloud/qwen_inference_server.py`, nu vLLM-gebaseerd) dat de trainingsroute niet raakt.
 - **Trainingsketen** (hergebruik van Auto Pilot's `train_sft.py`/`train_dpo.py`/`train_reflection.py`-
   patroon, geparametriseerd met `AUTOPILOT_DOMAIN=Orchard`-achtig mechanisme):
   1. **SFT**: instructie→antwoord-paren uit Track 1 (vakkennis) én Track 2 (logboek-afgeleide
@@ -1005,7 +1010,10 @@ Deel A-F zelf ook bijgewerkt met een verwijzing hierheen.
   extra), maar dat is bewust geaccepteerd: de GPU staat zo het grootste deel van een rustige dag
   leeg i.p.v. onnodig VRAM (en dus stroom/kosten) vast te houden voor een model dat toch niet gebruikt
   wordt. Was aanvankelijk op 60s gezet, op verzoek verruimd naar 180s zodat een gebruiker die binnen
-  een paar minuten een vervolgvraag stelt niet steeds opnieuw de laadtijd betaalt.
+  een paar minuten een vervolgvraag stelt niet steeds opnieuw de laadtijd betaalt. **Update
+  2026-10-09** ([G.21](#sec-g21)): na de vLLM-migratie verder verruimd naar **300s (5 minuten)** als
+  nieuwe standaard (`ORCHARD_QWEN_IDLE_UNLOAD_S`) — AWQ-gewichten+KV-cache passen zo ruim naast de
+  rest dat een langere drempel geen VRAM-risico geeft, alleen minder onnodige koude starts.
 
 <a id="sec-g2"></a>
 ## G.2 Walking skeleton: deterministische kern + Streamlit-app
@@ -1059,6 +1067,11 @@ Deel A-F zelf ook bijgewerkt met een verwijzing hierheen.
 
 <a id="sec-g4"></a>
 ## G.4 Qwen3-8B live op de cloud-pod (Fase 1)
+
+> **Update 2026-10-09** ([G.21](#sec-g21)): de inference-server (`cloud/qwen_inference_server.py`)
+> is sindsdien gemigreerd van `transformers.generate()` + bitsandbytes NF4 naar vLLM + AWQ 4-bit
+> (snelheid + streaming) — de rest van deze sectie beschrijft de oorspronkelijke, inmiddels
+> vervangen opzet, nog correct als geschiedenis van hoe Qwen3-8B voor het eerst live kwam.
 
 - `core/qwen_loader.py`, `cloud/qwen_inference_server.py`, `pipeline/qwen_remote.py`: direct
   overgenomen van Auto Pilot, vereenvoudigd tot één domein ("Orchard").
@@ -1631,3 +1644,105 @@ Geverifieerd: 189/189 tests, volledige 12-pagina AppTest-sweep, en een live chec
 daadwerkelijke sidebar-volgorde op de lokale server — klopt met bovenstaande lijst. Geen
 code buiten de bestandsnamen zelf hoefde aangepast te worden (geen `st.page_link`/
 `switch_page`-aanroepen die een vast pad-met-nummer verwachten).
+
+<a id="sec-g21"></a>
+## G.21 Inference-snelheid: migratie naar vLLM (AWQ), streaming, adaptieve thinking-budget
+
+**Aanleiding**: de gebruiker vroeg hoe Qwen3-8B sneller én beter gemaakt kon worden. Vijf
+concrete verbeteringen afgesproken en alle vijf doorgevoerd:
+
+**1. vLLM i.p.v. `transformers.generate()`** — het grootste deel van het werk. Oorspronkelijk
+voorstel was FP8-kwantisatie, maar de A30 is Ampere (compute capability 8.0) — geen native
+FP8-tensor-cores; **AWQ 4-bit** (`Qwen/Qwen3-8B-AWQ`, officieel Qwen-kwant) is hier de juiste
+keuze, bevestigd via vLLM's eigen Marlin-kernel-ondersteuning.
+
+**Python-versie/CUDA-blokkade, grondig uitgezocht vóór een workaround**: vLLM ondersteunt
+Python 3.13 pas vanaf v0.20.0 — maar diezelfde release schakelde het standaard PyPI-wheel om
+naar CUDA 13.0-binaries. De pod-driver (570.133.07) initialiseert CUDA 13 niet
+("driver is too old"), **hard geverifieerd** (niet aangenomen): zelfs met de juiste
+bibliotheekpaden (`libcudart.so.13` wél vindbaar) weigerde `torch.cuda` te initialiseren.
+Onderzochte en afgewezen alternatieven, in volgorde:
+- NVIDIA's `cuda-compat-13`-forward-compatibility-pakket — bestaat niet voor Ubuntu 20.04 in
+  NVIDIA's eigen repo (stopt bij `cuda-compat-12-9`).
+- Driver-upgrade via NVIDIA's officiële Ubuntu-20.04-apt-repo — biedt maximaal driver
+  575.57.08, en die ondersteunt bevestigd (NVIDIA's eigen release notes) nog steeds alleen
+  CUDA 12.x, niet 13.0. Driver 580 (wél CUDA 13) staat niet in die repo; alleen via een losse
+  `.run`-installer buiten apt om, op een EOL-distro — als risico te groot beoordeeld en niet
+  uitgevoerd (geen kernelmodule/driver-wijziging op de pod).
+- Overstappen naar een andere LeafCloud-GPU (A100/H100/RTX 6000 Blackwell gecheckt via
+  `leaf.cloud/products/gpu`) — zou het probleem structureel oplossen (nieuwere GPU-generaties
+  komen met een moderne driver), maar betekent een volledig nieuwe pod: nieuw IP (de huidige
+  publieke URL `45-135-57-59.sslip.io` IS het huidige pod-IP), volledige herimplementatie, en
+  3-5× hogere kosten voor een model dat ruim in 24 GB past. In overleg met de gebruiker
+  afgewezen; **blijft wel een optie voor later** als de training-fase (Deel E stap 5/7) toch
+  een grotere GPU nodig heeft.
+- **Gekozen oplossing**: één losse `.venv-vllm` (Python 3.12, `vllm==0.19.0` — de laatste
+  release vóór de CUDA-13-omschakeling) specifiek voor déze systemd-service
+  (`cloud/qwen_inference_server.py`'s eigen ExecStart), naast de normale, projectbrede
+  `.venv` (Python 3.13) die ongewijzigd blijft voor app/tests/trainingspijplijn. Zie
+  `cloud/qwen_inference_server.py`'s eigen docstring voor de exacte heropbouwstappen.
+
+**Herbouw**: `cloud/qwen_inference_server.py` volledig herschreven rond vLLM's
+`AsyncLLM`/`AsyncEngineArgs` (`enable_prefix_caching=True` — scheelt vooral bij het
+steeds-identieke systeemprompt+tool-catalogus), met een kleine `_EngineLoop`-brug (eigen
+asyncio-event-loop-thread) om vLLM's async-native engine te laten samenwerken met de
+bestaande synchrone `http.server`-opzet (bewust geen nieuwe dependency zoals FastAPI
+toegevoegd — zelfde "stdlib-only waar mogelijk"-conventie als de rest van dit project). De
+`weights`-contractsemantiek van `core/qwen_loader.py` (ongewijzigd gelaten, nog nodig voor
+toekomstige QLoRA-training) is zo goed mogelijk overgenomen (`"W0_base"`/`"MERGED:<dir>"`),
+met één bewuste vereenvoudiging: vLLM's LoRA-ondersteuning bedient één actieve adapter per
+request, geen PEFT-stijl sequentiële merge-keten van meerdere adapters — niet relevant
+zolang er nog geen getrainde adapter bestaat (Deel E stap 5/7 nog niet gestart), expliciet
+gedocumenteerd als toekomstig aandachtspunt i.p.v. stilzwijgend iets anders te doen.
+
+**Gemeten resultaat** (A30, steady-state na eerste model-load): **~108 tokens/s**, tegen
+een sterk prefix-cache-voordeel bij herhaalde identieke prompts (eerste aanroep inclusief
+engine-opbouw ~45s, erna binnen 1-5s voor 150-500 tokens) — een orde van grootte sneller dan
+de oude bitsandbytes-NF4-transformers-route.
+
+**2. Streaming naar Streamlit** — `cloud/qwen_inference_server.py` kreeg een nieuwe
+`/generate_stream`-endpoint (newline-delimited JSON over een close-delimited HTTP-respons,
+bewust geen handmatige HTTP-chunked-encoding-framing — eenvoudiger en net zo robuust).
+`pipeline/qwen_remote.py::stream_remote()` is de client-kant. `pipeline/orchard_agent.py`
+kreeg een streaming-tweeling `ask_orchard_advisor_stream()` (+ `StreamingAdvisorAnswer`,
+`_stream_hop()`): tussentijdse ReACT-tool-hops worden NIET gestreamd (de volledige tekst is
+meteen nodig om een tool-call-JSON te herkennen), maar zodra een hop zich niet als tool-call
+gedraagt en het `<think>`-blok gesloten is, streamt de rest van die hop live naar de
+gebruiker. De ruwe `<think>`-inhoud zelf wordt nooit live getoond (blijft voorbehouden aan de
+inklapbare "Redenering"-sectie, zoals voorheen). `app/pages/3_Vraag_de_Adviseur.py` gebruikt
+nu `st.write_stream()` voor het LLM-pad; de deterministische tool-routes (vorst/regen/
+koude-uren/...) blijven ongewijzigd instant (geen streaming nodig, was al <1s).
+
+**3. Idle-unload-timeout verhoogd** — van 180s naar standaard **300s (5 minuten)**,
+instelbaar via `ORCHARD_QWEN_IDLE_UNLOAD_S` (0 = volledig uit). AWQ-gewichten + KV-cache
+passen ruim naast de rest op de A30 (24 GB), dus een langere drempel voorkomt onnodige
+koude starts tijdens een lopend gesprek zonder de GPU blijvend bezet te houden.
+
+**4. Adaptieve thinking-budget** — `pipeline/orchard_agent.py::_needs_deep_thinking()`, een
+simpele, expliciet NIET-veiligheidskritische heuristiek (woordaantal + markers als "en",
+"rekening houdend", "waarom"): een korte, enkelvoudige vraag die net niet door de
+Streamlit-pagina's eigen keyword-router werd opgevangen krijgt `enable_thinking=False`
+(Qwen3's snellere, non-thinking modus), een echte meerfactor-adviesvraag krijgt
+`enable_thinking=True`. Na de EERSTE tool-aanroep wordt het token-budget voor volgende hops
+gehalveerd (`_POST_TOOL_MIN_TOKENS`-ondergrens) — het model synthetiseert dan een antwoord
+uit al aangeleverde feiten, geen nieuwe verkenning nodig.
+
+**5. Sampling-parameters herzien** — de oude `do_sample=False` (greedy decoding) +
+`repetition_penalty=1.15`-noodgreep vervangen door Qwen's eigen officieel aanbevolen
+sampling (bevestigd via Qwen's model card): **thinking-modus** temperature=0.6/top_p=0.95/
+top_k=20/repetition_penalty=1.0, **non-thinking-modus** temperature=0.7/top_p=0.8/top_k=20/
+repetition_penalty=1.0 — greedy decoding wordt door Qwen zelf afgeraden voor Qwen3 (kan de
+`<think>`-modus laten vastlopen/herhalen, precies het symptoom dat de oude
+`repetition_penalty=1.15`-noodgreep probeerde te maskeren). Elke parameter blijft
+per-aanroep overschrijfbaar (`pipeline/qwen_remote.py`'s `**sampling`-doorgave) voor een
+toekomstige kwaliteitsevaluatie tegen een gouden eval-set (Deel E stap 9, nog open).
+
+**Geverifieerd, niet alleen gebouwd**: live getest op de echte pod (systemd-herstart-cyclus,
+`/health`/`/status`/`/generate`/`/generate_stream` via curl) EN end-to-end vanaf de laptop via
+de SSH-tunnel (`ask_orchard_advisor_stream()` tegen de echte server, twee vragen met
+verschillende complexiteit) — streaming leverde correct 71-112 losse tekstfragmenten op,
+en `assess_grounding()` ving daarbij terecht een geval op waarin het model een
+"Bronnen:"-regel verzon zonder een echte tool aan te roepen (bestaand, gedocumenteerd
+basismodel-gedrag — geen regressie, zie Deel F #12). 198/198 tests groen, inclusief een
+nieuwe `tests/test_vraag_de_adviseur_page.py`-AppTest-smoke-check (eerste voor deze pagina)
+en nieuwe unit tests voor `_needs_deep_thinking()`/`_build_payload()`.

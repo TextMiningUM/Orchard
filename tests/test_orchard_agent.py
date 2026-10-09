@@ -6,6 +6,7 @@ from __future__ import annotations
 from pipeline.orchard_agent import (
     _dedup,
     _extract_tool_call,
+    _needs_deep_thinking,
     _strip_think,
     assess_grounding,
     build_history_messages,
@@ -116,3 +117,22 @@ def test_build_history_messages_leaves_user_turns_untouched():
 
 def test_build_history_messages_empty_list():
     assert build_history_messages([]) == []
+
+
+# ── _needs_deep_thinking ─────────────────────────────────────────────────────────────────────
+def test_needs_deep_thinking_false_for_short_single_fact_question():
+    assert _needs_deep_thinking("Wat is koude-uren-accumulatie bij zoete kers?") is False
+
+
+def test_needs_deep_thinking_true_for_long_question():
+    long_question = " ".join(["woord"] * 19)
+    assert _needs_deep_thinking(long_question) is True
+
+
+def test_needs_deep_thinking_true_for_multi_factor_marker():
+    q = "Ik heb kersenvlieg en monilia tegelijk, wat moet ik eerst doen?"
+    assert _needs_deep_thinking(q) is True
+
+
+def test_needs_deep_thinking_false_for_simple_tool_style_question():
+    assert _needs_deep_thinking("Is er regen vandaag?") is False

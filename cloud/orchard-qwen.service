@@ -1,0 +1,14 @@
+[Unit]
+Description=Cherry Orchard Advisor - Qwen3-8B-AWQ inference server (localhost only, vLLM backend)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Orchard
+ExecStart=/home/ubuntu/Orchard/.venv-vllm/bin/python -u cloud/qwen_inference_server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

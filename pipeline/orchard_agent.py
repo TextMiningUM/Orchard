@@ -10,14 +10,24 @@ Pipeline per question:
      step always running when `spec["rag"]` is set.
   2. Build a system+user prompt: persona, grounding/compliance rules, the retrieved excerpts,
      and (if a tool catalog is given) the ReACT tool-call protocol.
-  3. Call the cloud Qwen3-8B server with ``enable_thinking=True`` -- Qwen3's native chain-of-
-     thought (``<think>...</think>``) is used directly instead of a hand-rolled COT_INSTR
-     prompt trick (Auto Pilot's own domains needed the latter because their base checkpoints
-     don't expose a native thinking mode the same way; Qwen3 does, so use it).
+  3. Call the cloud Qwen3-8B server with an ADAPTIVE thinking budget (`_needs_deep_thinking()`,
+     2026-10-09): a short, single-fact question gets `enable_thinking=False` (Qwen3's native
+     non-thinking mode -- faster, no `<think>` block at all), a genuinely multi-factor advice
+     question gets `enable_thinking=True` (Qwen3's native chain-of-thought). Either way this
+     uses Qwen3's OWN thinking toggle directly instead of a hand-rolled COT_INSTR prompt trick
+     (Auto Pilot's own domains needed the latter because their base checkpoints don't expose a
+     native thinking mode the same way; Qwen3 does, so use it).
   4. Parse the reply: either a `{"call_tool": ..., "args": ...}` request (execute it, append the
      result as a new user turn, loop -- up to `max_tool_hops`) or a final plain-text answer.
   5. Return the answer, the extracted reasoning trace (for an optional "Redenering" expander in
      the UI), every tool call made, and a deduped source list for a "Bronnen:" footer.
+
+`ask_orchard_advisor_stream()` is a streaming twin of the above for the UI's final answer
+(`st.write_stream()`, 2026-10-09 vLLM migration -- see design doc Sec G.21): intermediate
+ReACT tool-call hops are NOT streamed (the full text is needed immediately to detect a
+tool-call JSON vs. a plain answer, same reasoning as `generate_remote()` vs `stream_remote()`
+in `pipeline/qwen_remote.py`), but the final hop is streamed token-by-token to the user once
+it's clear it's a plain-text answer and not a tool call (see `_stream_hop()`).
 """
 from __future__ import annotations
 
@@ -27,7 +37,7 @@ from dataclasses import dataclass, field
 
 from pipeline.orchard_rag import RagIndex
 from pipeline.orchard_tool_catalog import BoundTool, build_tool_catalog
-from pipeline.qwen_remote import generate_remote
+from pipeline.qwen_remote import generate_remote, stream_remote
 
 SYSTEM_PROMPT = (
     "Je bent een Nederlandstalige adviseur voor een kersenteler (zoete kers, Prunus avium). "
@@ -103,6 +113,29 @@ def _dedup(items: list[str]) -> list[str]:
     return out
 
 
+# A long question, or one with multiple clauses/conditions to weigh, benefits from Qwen3's
+# full <think> chain-of-thought; a short single-fact lookup that merely missed the Streamlit
+# page's own keyword router (`_route_question()` in `app/pages/3_Vraag_de_Adviseur.py` --
+# vorst/regen/koude-uren/suzuki/barst/middel questions never even reach this module) does not.
+_COMPLEXITY_MARKERS = (
+    " en ", " maar ", " zowel ", " rekening houdend", " gelijktijdig", " allebei", " beide",
+    " tegelijk", " waarom ", " hoe kan het dat", " welke van de", " of moet ik",
+)
+_COMPLEXITY_WORD_THRESHOLD = 18
+
+
+def _needs_deep_thinking(question: str) -> bool:
+    """Heuristic (design doc Deel F) for an adaptive thinking budget -- NOT a safety-relevant
+    classifier: worst case a "simple" question gets a shallower-than-ideal budget and the
+    answer is a bit less thorough, never wrong (the grounding/citation rules in SYSTEM_PROMPT
+    apply identically either way). `enable_thinking=False` is Qwen3's own faster, non-thinking
+    mode (no <think> block generated at all -- see cloud/qwen_inference_server.py's measured
+    tokens/s), appropriate for a short, single-fact question; `enable_thinking=True` is kept
+    for anything that weighs multiple factors/conditions, i.e. a genuine advice question."""
+    q = f" {question.strip().lower()} "
+    return len(question.split()) > _COMPLEXITY_WORD_THRESHOLD or any(m in q for m in _COMPLEXITY_MARKERS)
+
+
 def build_history_messages(turns: list[tuple[str, str]]) -> list[dict]:
     """Pure: converts a flat ``[(role, text), ...]`` conversation log (oldest first, e.g. the
     Streamlit page's own chat history) into the ``[{"role": ..., "content": ...}, ...]`` shape
@@ -137,22 +170,14 @@ def assess_grounding(answer: str, sources: list[str], tool_calls: list[str]) -> 
     return "red"
 
 
-def ask_orchard_advisor(
-    question: str, ctx, snapshot: dict | None = None, rag_index: RagIndex | None = None,
-    max_tool_hops: int = 3, max_new_tokens: int = 700,
-    history: list[dict] | None = None, max_history_turns: int = 4,
-) -> AdvisorResponse:
-    """Builds the prompt, runs the (optional) ReACT tool-call loop, and returns a grounded
-    answer. Never raises on a reachable-but-confused model reply -- worst case, the raw model
-    text is returned as the answer with an empty source list, same "always return something
-    usable" posture as the rest of this project's LLM call sites.
-
-    `history` (new, 2026-10-09): prior turns of the SAME conversation, as
-    ``[{"role": "user"|"assistant", "content": ...}, ...]`` oldest-first -- lets the model
-    answer follow-up questions ("en hoe zit dat met ...?") with real context instead of
-    treating every question as a fresh, isolated one. Capped to the last
-    `max_history_turns` EXCHANGES (so `2 * max_history_turns` messages) to keep the prompt
-    within the server's token budget -- older turns are silently dropped, newest first."""
+def _build_prompt_state(
+    question: str, ctx, snapshot: dict | None, rag_index: RagIndex | None,
+    max_tool_hops: int, history: list[dict] | None, max_history_turns: int,
+) -> tuple[list[dict], dict[str, BoundTool], list[str]]:
+    """Shared prelude for `ask_orchard_advisor()`/`ask_orchard_advisor_stream()`: upfront RAG
+    search, tool catalog, and the system+user prompt (incl. capped conversation history --
+    see `ask_orchard_advisor()`'s docstring for the `history`/`max_history_turns` contract).
+    Returns (messages, tool_catalog, sources-so-far)."""
     from pipeline.orchard_rag import format_context, format_sources, retrieve
 
     sources: list[str] = []
@@ -175,12 +200,41 @@ def ask_orchard_advisor(
     capped_history = (history or [])[-(2 * max_history_turns):]
     messages = [{"role": "system", "content": SYSTEM_PROMPT}, *capped_history,
                 {"role": "user", "content": user_msg}]
+    return messages, tool_catalog, sources
+
+
+def ask_orchard_advisor(
+    question: str, ctx, snapshot: dict | None = None, rag_index: RagIndex | None = None,
+    max_tool_hops: int = 3, max_new_tokens: int = 700,
+    history: list[dict] | None = None, max_history_turns: int = 4,
+) -> AdvisorResponse:
+    """Builds the prompt, runs the (optional) ReACT tool-call loop, and returns a grounded
+    answer. Never raises on a reachable-but-confused model reply -- worst case, the raw model
+    text is returned as the answer with an empty source list, same "always return something
+    usable" posture as the rest of this project's LLM call sites.
+
+    `history` (new, 2026-10-09): prior turns of the SAME conversation, as
+    ``[{"role": "user"|"assistant", "content": ...}, ...]`` oldest-first -- lets the model
+    answer follow-up questions ("en hoe zit dat met ...?") with real context instead of
+    treating every question as a fresh, isolated one. Capped to the last
+    `max_history_turns` EXCHANGES (so `2 * max_history_turns` messages) to keep the prompt
+    within the server's token budget -- older turns are silently dropped, newest first.
+
+    Thinking budget (2026-10-09, see `_needs_deep_thinking()`): decided ONCE per question from
+    the question text itself, then reused for every hop of that question's loop. After the
+    FIRST tool call, the per-hop token budget is halved (floor `_POST_TOOL_MIN_TOKENS`) -- the
+    model is now synthesizing an answer from facts already handed to it, not exploring from
+    scratch, so it needs less headroom."""
+    enable_thinking = _needs_deep_thinking(question)
+    messages, tool_catalog, sources = _build_prompt_state(
+        question, ctx, snapshot, rag_index, max_tool_hops, history, max_history_turns)
 
     reasoning_parts: list[str] = []
     tool_calls_made: list[str] = []
+    budget = max_new_tokens
 
     for _hop in range(max_tool_hops + 1):
-        raw = generate_remote(messages=messages, max_new_tokens=max_new_tokens, enable_thinking=True)
+        raw = generate_remote(messages=messages, max_new_tokens=budget, enable_thinking=enable_thinking)
         reasoning, remainder = _strip_think(raw)
         if reasoning:
             reasoning_parts.append(reasoning)
@@ -189,7 +243,7 @@ def ask_orchard_advisor(
             # Generation was cut off mid-<think> (max_new_tokens reached before the model
             # got to its actual answer) -- one retry with a larger budget before giving up,
             # rather than silently returning an empty/broken-looking answer.
-            raw = generate_remote(messages=messages, max_new_tokens=max_new_tokens * 2, enable_thinking=True)
+            raw = generate_remote(messages=messages, max_new_tokens=budget * 2, enable_thinking=enable_thinking)
             reasoning, remainder = _strip_think(raw)
             if reasoning:
                 reasoning_parts.append(reasoning)
@@ -218,10 +272,11 @@ def ask_orchard_advisor(
         tool_calls_made.append(name)
         sources.extend(result.sources)
         messages.append({"role": "user", "content": f"Tool-resultaat ({name}):\n{result.facts}\n\nGeef nu je antwoord, of roep nog een tool aan."})
+        budget = max(_POST_TOOL_MIN_TOKENS, max_new_tokens // 2)
 
     # Exhausted all hops without a final answer -- ask once more, tools disabled, as a safety net.
     messages.append({"role": "user", "content": "Je hebt geen tool-aanroepen meer over. Geef nu je definitieve antwoord in platte tekst."})
-    raw = generate_remote(messages=messages, max_new_tokens=max_new_tokens, enable_thinking=True)
+    raw = generate_remote(messages=messages, max_new_tokens=budget, enable_thinking=enable_thinking)
     reasoning, remainder = _strip_think(raw)
     if reasoning:
         reasoning_parts.append(reasoning)
@@ -234,3 +289,152 @@ def ask_orchard_advisor(
         sources=deduped_sources,
         grounding=assess_grounding(final_answer, deduped_sources, tool_calls_made),
     )
+
+
+_POST_TOOL_MIN_TOKENS = 250
+
+
+class StreamingAdvisorAnswer:
+    """Iterable of visible answer-text chunks for `st.write_stream()`. Iterate it directly to
+    display the final answer live as it's generated; once fully consumed, `.response` holds
+    the same `AdvisorResponse` the non-streaming `ask_orchard_advisor()` returns (reasoning,
+    tool_calls, sources, grounding) for the rest of the UI (CoT expander, grounding badge,
+    feedback buttons) to use exactly as before."""
+
+    def __init__(self, generator_fn) -> None:
+        self._gen = generator_fn()
+        self.response: AdvisorResponse | None = None
+
+    def __iter__(self):
+        for chunk in self._gen:
+            if isinstance(chunk, AdvisorResponse):
+                self.response = chunk
+            else:
+                yield chunk
+
+
+def _stream_hop(messages: list[dict], max_new_tokens: int, enable_thinking: bool):
+    """Streams ONE generation hop via `stream_remote()`. Yields visible answer-text chunks
+    (for live display) while SILENTLY buffering the `<think>` block (that has its own
+    "Redenering" expander, fed from the parsed-out reasoning afterwards -- raw thinking
+    tokens should never flash past in the main chat bubble) and, once past `</think>`,
+    silently buffering a hop whose remainder looks like it's forming a tool-call JSON (starts
+    with `{`) rather than a plain answer -- only a hop that's clearly NOT a tool call streams
+    its text live. Returns (raw_text, reasoning, remainder) as the final value via
+    `StopIteration` is avoided here -- callers should capture it via the generator's return,
+    so instead this is a generator that yields `str` chunks and, as its LAST item, yields the
+    `(raw, reasoning, remainder)` tuple for the caller to finish parsing (mirroring
+    `StreamingAdvisorAnswer`'s own "non-str sentinel as last item" convention)."""
+    raw = ""
+    last_visible_len = 0
+    decided_not_tool_call = False
+    for delta in stream_remote(messages=messages, max_new_tokens=max_new_tokens, enable_thinking=enable_thinking):
+        raw += delta
+        reasoning, remainder = _strip_think(raw)
+        if not remainder:
+            continue  # still inside an unclosed <think> block -- nothing visible yet
+        if not decided_not_tool_call:
+            if remainder.lstrip().startswith("{"):
+                continue  # looks like it's forming tool-call JSON -- stay silent this hop
+            decided_not_tool_call = True
+        new_text = remainder[last_visible_len:]
+        if new_text:
+            last_visible_len = len(remainder)
+            yield new_text
+    reasoning, remainder = _strip_think(raw)
+    yield (raw, reasoning, remainder)
+
+
+def ask_orchard_advisor_stream(
+    question: str, ctx, snapshot: dict | None = None, rag_index: RagIndex | None = None,
+    max_tool_hops: int = 3, max_new_tokens: int = 700,
+    history: list[dict] | None = None, max_history_turns: int = 4,
+) -> StreamingAdvisorAnswer:
+    """Streaming twin of `ask_orchard_advisor()` -- same prompt/ReACT/grounding logic, but the
+    FINAL hop (the one that turns out not to be a tool call) streams its answer text live via
+    the returned `StreamingAdvisorAnswer` instead of only being available once generation is
+    fully done. Intermediate tool-call hops are still generated hop-by-hop (not streamed to
+    the user -- see `_stream_hop()`'s docstring), so a question that needs 2 tool calls first
+    still shows a brief "thinking" pause before the live-streamed answer starts, same as
+    before; only the LAST, user-visible hop is now incremental."""
+    enable_thinking = _needs_deep_thinking(question)
+
+    def _run():
+        messages, tool_catalog, sources = _build_prompt_state(
+            question, ctx, snapshot, rag_index, max_tool_hops, history, max_history_turns)
+        reasoning_parts: list[str] = []
+        tool_calls_made: list[str] = []
+        budget = max_new_tokens
+
+        for _hop in range(max_tool_hops + 1):
+            raw = reasoning = remainder = ""
+            for item in _stream_hop(messages, budget, enable_thinking):
+                if isinstance(item, tuple):
+                    raw, reasoning, remainder = item
+                else:
+                    yield item
+            if reasoning:
+                reasoning_parts.append(reasoning)
+
+            if not remainder:
+                # Cut off mid-<think> -- one silent retry with a larger budget (not streamed,
+                # since we don't yet know if THIS attempt even produces a visible answer).
+                raw = generate_remote(messages=messages, max_new_tokens=budget * 2, enable_thinking=enable_thinking)
+                reasoning, remainder = _strip_think(raw)
+                if reasoning:
+                    reasoning_parts.append(reasoning)
+                if remainder:
+                    yield remainder
+
+            tool_call = _extract_tool_call(remainder) if _hop < max_tool_hops else None
+            if tool_call is None:
+                final_answer = remainder or "(geen antwoord ontvangen -- het model had meer tokens nodig dan beschikbaar)"
+                if not remainder:
+                    yield final_answer  # nothing was streamed yet for this (rare) double-cutoff case
+                deduped_sources = _dedup(sources)
+                yield AdvisorResponse(
+                    answer=final_answer,
+                    reasoning="\n\n".join(reasoning_parts),
+                    tool_calls=tool_calls_made,
+                    sources=deduped_sources,
+                    grounding=assess_grounding(final_answer, deduped_sources, tool_calls_made),
+                )
+                return
+
+            name = tool_call.get("call_tool")
+            tool = tool_catalog.get(name)
+            messages.append({"role": "assistant", "content": remainder})
+            if tool is None:
+                messages.append({"role": "user", "content": f"Onbekende tool {name!r}. Kies een tool uit de lijst of geef je antwoord."})
+                continue
+
+            arg = tool_call.get("args")
+            result = tool.fn(arg if isinstance(arg, str) else None)
+            tool_calls_made.append(name)
+            sources.extend(result.sources)
+            messages.append({"role": "user", "content": f"Tool-resultaat ({name}):\n{result.facts}\n\nGeef nu je antwoord, of roep nog een tool aan."})
+            budget = max(_POST_TOOL_MIN_TOKENS, max_new_tokens // 2)
+
+        # Exhausted all hops -- ask once more, tools disabled, streamed (it's necessarily final).
+        messages.append({"role": "user", "content": "Je hebt geen tool-aanroepen meer over. Geef nu je definitieve antwoord in platte tekst."})
+        raw = reasoning = remainder = ""
+        for item in _stream_hop(messages, budget, enable_thinking):
+            if isinstance(item, tuple):
+                raw, reasoning, remainder = item
+            else:
+                yield item
+        if reasoning:
+            reasoning_parts.append(reasoning)
+        final_answer = remainder or "(geen antwoord ontvangen)"
+        if not remainder:
+            yield final_answer
+        deduped_sources = _dedup(sources)
+        yield AdvisorResponse(
+            answer=final_answer,
+            reasoning="\n\n".join(reasoning_parts),
+            tool_calls=tool_calls_made,
+            sources=deduped_sources,
+            grounding=assess_grounding(final_answer, deduped_sources, tool_calls_made),
+        )
+
+    return StreamingAdvisorAnswer(_run)

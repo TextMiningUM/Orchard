@@ -1,16 +1,35 @@
-"""Qwen3-8B cloud inference server for the Cherry Orchard Advisor.
+"""Qwen3-8B cloud inference server for the Cherry Orchard Advisor -- vLLM backend.
 
-Direct port of Auto Pilot's `cloud/qwen_inference_server.py` -- see that file's docstring
-for the full rationale. Simplified here since Orchard currently has a single domain (no
-VHF/OOW/Captain/ChiefEngineer-style multi-domain dispatch needed yet); `domain` is kept as
-a parameter anyway so a second orchard crop (apples, pears, ...) could reuse this
-unchanged later, per the project's "never fork a second copy" convention.
+Direct port of Auto Pilot's `cloud/qwen_inference_server.py` in spirit, but the generation
+backend was migrated 2026-10-09 from `transformers.generate()` (bitsandbytes NF4) to
+**vLLM** (AWQ 4-bit) for continuous batching, automatic prefix caching (the system prompt +
+tool catalogue are identical every turn) and real token streaming -- see
+`design_cherry_orchard_advisor.md` Sec G.21 for the full story and measured numbers.
 
-CLOUD-ONLY. Binds to 127.0.0.1 ONLY (never 0.0.0.0) -- this process must never be
-directly reachable from the public internet, unlike the public read-only Streamlit
-dashboard (which proxies through nginx on a different port). Access it either from the
-SAME pod (the public Streamlit app calls http://127.0.0.1:8811 directly) or from a local
-laptop via an SSH tunnel:
+RUNTIME NOTE -- separate Python 3.12 venv, not the project's normal Python 3.13 `.venv`:
+vLLM only gained Python 3.13 support in v0.20.0, but that SAME release switched its default
+PyPI wheel to CUDA 13.0 binaries, which this pod's NVIDIA driver (570.133.07, max CUDA 12.8)
+cannot initialise ("driver is too old") -- confirmed by direct testing, not a packaging bug:
+even with the CUDA-13 shared libraries made importable, `torch.cuda` itself refuses to
+initialise. NVIDIA's own Ubuntu-20.04 repo only offers driver 575.57.08 (still CUDA-12.x per
+NVIDIA's own release notes, not enough either), and driver 580 would require a manual
+out-of-repo .run installer on an EOL distro -- rejected as too risky for this pod. The
+practical fix, agreed with the user: keep this ONE service on a dedicated `.venv-vllm`
+(Python 3.12, `vllm==0.19.0`, last release before the CUDA-13 default switch) while the rest
+of the project (app, tests, training pipeline) stays on Python 3.13 in the normal `.venv`.
+Rebuild it with:
+    ~/.local/bin/uv venv --python 3.12 .venv-vllm
+    ~/.local/bin/uv pip install --python .venv-vllm/bin/python vllm==0.19.0
+(A real driver/GPU upgrade -- e.g. LeafCloud's RTX 6000 Blackwell, which ships a modern
+enough driver for vLLM's CUDA-13 default out of the box -- was considered and explicitly
+deferred: ~3x the hourly cost and a full redeploy, including a NEW public IP/domain since
+the current deployment's hostname IS this pod's IP. Revisit if/when the training stack
+needs the bigger GPU anyway.)
+
+CLOUD-ONLY. Binds to 127.0.0.1 ONLY (never 0.0.0.0) -- this process must never be directly
+reachable from the public internet, unlike the public read-only Streamlit dashboard (which
+proxies through nginx on a different port). Access it either from the SAME pod (the public
+Streamlit app calls http://127.0.0.1:8811 directly) or from a local laptop via an SSH tunnel:
     ssh -N -L 8811:127.0.0.1:8811 -i <key> ubuntu@<pod-ip>
 
 No authentication is implemented because localhost-only binding (+ the SSH tunnel for
@@ -18,15 +37,18 @@ remote access) IS the access control -- do not change this to bind 0.0.0.0 witho
 real authentication first.
 
 Run (inside tmux or as a systemd service, so it survives SSH disconnects):
-    .venv/bin/python -u cloud/qwen_inference_server.py
+    .venv-vllm/bin/python -u cloud/qwen_inference_server.py
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import subprocess
 import sys
 import threading
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -35,68 +57,181 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import torch
+from transformers import AutoTokenizer
+from vllm import SamplingParams
+from vllm.engine.arg_utils import AsyncEngineArgs
+from vllm.lora.request import LoRARequest
+from vllm.v1.engine.async_llm import AsyncLLM
 
 from core.paths import AgentPaths
-from core.qwen_loader import load_qwen
 
 HOST, PORT = "127.0.0.1", 8811
 
 _DOMAIN_FACTORY = {"Orchard": AgentPaths.orchard}
 
-_model_cache: dict[tuple[str, str], tuple] = {}
+AWQ_MODEL_ID = "Qwen/Qwen3-8B-AWQ"  # official Qwen AWQ 4-bit quant -- fits the A30 with room
+                                    # to spare for KV cache (bitsandbytes NF4 needed the old
+                                    # transformers path; vLLM's fast AWQ/Marlin kernels replace it)
+MAX_MODEL_LEN = 16384  # generous headroom for RAG context + tool-call history; Qwen3 supports
+                        # up to 32768 natively, this is a deliberate budget vs. KV-cache memory
+GPU_MEMORY_UTILIZATION = 0.85
+
+# Qwen's own recommended sampling (see https://huggingface.co/Qwen/Qwen3-8B -- greedy decoding
+# is explicitly NOT recommended for Qwen3, it can make the <think> block degenerate/repeat;
+# this is also why the old transformers path had hacked in repetition_penalty=1.15 as a
+# band-aid for greedy decoding. Proper sampling removes the need for that hack entirely).
+_SAMPLING_DEFAULTS = {
+    True: dict(temperature=0.6, top_p=0.95, top_k=20, repetition_penalty=1.0),   # enable_thinking=True
+    False: dict(temperature=0.7, top_p=0.8, top_k=20, repetition_penalty=1.0),   # enable_thinking=False
+}
+
+IDLE_UNLOAD_S = float(os.environ.get("ORCHARD_QWEN_IDLE_UNLOAD_S", "300"))
+# Default 300s (5 min) -- deliberately much longer than the old transformers path's 180s.
+# vLLM's AWQ weights + KV cache comfortably fit the A30 (24 GB) alongside everything else
+# this pod runs, so there's no real VRAM-pressure reason to evict quickly; a 5-minute floor
+# just keeps the GPU free during genuinely idle stretches (overnight, etc.) while avoiding a
+# cold-start penalty on the next request for any back-and-forth within a normal chat session.
+# Set ORCHARD_QWEN_IDLE_UNLOAD_S=0 to disable entirely, or any other value to override.
+
+
+class _EngineLoop:
+    """Owns one dedicated asyncio event loop in a background thread -- vLLM's `AsyncLLM` is
+    asyncio-native, but the HTTP server here is the stdlib synchronous `http.server`. This
+    bridges the two: `run()` schedules a coroutine onto the loop and blocks the calling
+    (synchronous) handler thread until it completes; `stream()` does the same but yields
+    items as they arrive via a thread-safe queue, for the `/generate_stream` endpoint."""
+
+    def __init__(self) -> None:
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
+        self._thread.start()
+
+    def run(self, coro):
+        return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+
+    def stream(self, async_gen_factory):
+        """`async_gen_factory()` returns an async generator; yields its items synchronously
+        (blocking the calling thread per item) by running the generator's iteration on the
+        event-loop thread and handing results back through a plain `queue.Queue`."""
+        import queue
+        q: queue.Queue = queue.Queue()
+        _SENTINEL = object()
+
+        async def _pump():
+            try:
+                async for item in async_gen_factory():
+                    q.put(item)
+            except Exception as e:  # noqa: BLE001 -- surface the error to the stream consumer
+                q.put(e)
+            finally:
+                q.put(_SENTINEL)
+
+        asyncio.run_coroutine_threadsafe(_pump(), self._loop)
+        while True:
+            item = q.get()
+            if item is _SENTINEL:
+                return
+            if isinstance(item, Exception):
+                raise item
+            yield item
+
+
+_engine_loop = _EngineLoop()
+_engine_cache: dict[tuple[str, str], tuple] = {}  # (domain, weights) -> (AsyncLLM, tokenizer, lora_request|None)
 _last_used: dict[tuple[str, str], float] = {}
-_active_key: tuple[str, str] | None = None
 _cache_lock = threading.Lock()
-_gen_lock = threading.Lock()  # one generation at a time -- a single GPU can't usefully parallelise anyway
-
-IDLE_UNLOAD_S = 180.0  # evict an idle cached model after this many seconds with no /generate traffic
 
 
-def _get_model(domain: str, weights: str):
+def _resolve_model_source(weights: str, paths: AgentPaths) -> tuple[str, "LoRARequest | None"]:
+    """Mirrors `core/qwen_loader.py::load_qwen()`'s `weights` contract (see that module's
+    docstring) as closely as vLLM allows:
+    - `"W0_base"` -> the official AWQ-quantized base model, no adapter.
+    - `"MERGED:<dir>"` -> a standalone, already-merged model directory under
+      `paths.domain_models_dir`, used directly as the base (no adapter).
+    - anything else -> a SINGLE LoRA adapter directory name, applied on top of the AWQ base
+      via vLLM's native LoRA support (`enable_lora=True` + `LoRARequest`).
+
+    Deliberately simplified vs. the PEFT-based loader: vLLM's LoRA support serves one active
+    adapter per request, not a sequential merge-and-stack CHAIN of several adapters the way
+    `core/qwen_loader.py` supports for training-time composition. No adapters have been
+    trained yet (SFT/DPO -- design doc Deel E steps 5/7 -- are both still "not started"), so
+    a `"+"`-joined multi-adapter chain is rejected with a clear error rather than silently
+    doing something different from what was asked; revisit once a real adapter exists."""
+    if weights == "W0_base":
+        return AWQ_MODEL_ID, None
+    if weights.startswith("MERGED:"):
+        merged_dir = paths.domain_models_dir / weights[len("MERGED:"):]
+        if not merged_dir.exists():
+            raise FileNotFoundError(f"No merged model directory at {merged_dir} for weights={weights!r}")
+        return str(merged_dir), None
+    if "+" in weights:
+        raise NotImplementedError(
+            f"weights={weights!r}: vLLM serves one LoRA adapter per request, not a PEFT-style "
+            "sequential merge-chain of several adapters. Train/apply a single merged adapter, "
+            "or extend this loader once multi-adapter composition is actually needed."
+        )
+    adapter_dir = paths.domain_models_dir / weights
+    if not adapter_dir.exists():
+        raise FileNotFoundError(f"No adapter directory at {adapter_dir} for weights={weights!r}")
+    lora = LoRARequest(lora_name=weights, lora_int_id=abs(hash(weights)) % 1_000_000 + 1, lora_path=str(adapter_dir))
+    return AWQ_MODEL_ID, lora
+
+
+async def _build_engine(domain: str, weights: str):
+    factory = _DOMAIN_FACTORY.get(domain)
+    if factory is None:
+        raise ValueError(f"Unknown domain {domain!r} -- known: {sorted(_DOMAIN_FACTORY)}")
+    model_source, lora = _resolve_model_source(weights, factory())
+    tok = AutoTokenizer.from_pretrained(model_source)
+    engine_args = AsyncEngineArgs(
+        model=model_source,
+        max_model_len=MAX_MODEL_LEN,
+        gpu_memory_utilization=GPU_MEMORY_UTILIZATION,
+        dtype="auto",
+        enable_prefix_caching=True,  # system prompt + tool catalogue repeat every turn
+        enable_lora=lora is not None,
+    )
+    engine = AsyncLLM.from_engine_args(engine_args)
+    return engine, tok, lora
+
+
+def _get_engine(domain: str, weights: str):
     key = (domain, weights)
     with _cache_lock:
-        if key not in _model_cache:
+        if key not in _engine_cache:
             print(f"Loading {domain}/{weights} ...", flush=True)
-            factory = _DOMAIN_FACTORY.get(domain)
-            if factory is None:
-                raise ValueError(f"Unknown domain {domain!r} -- known: {sorted(_DOMAIN_FACTORY)}")
-            _model_cache[key] = load_qwen(weights, factory())
+            _engine_cache[key] = _engine_loop.run(_build_engine(domain, weights))
             print(f"Loaded {domain}/{weights}.", flush=True)
         _last_used[key] = time.time()
-        return _model_cache[key]
+        return _engine_cache[key]
 
 
-def _unload_models(domain: str | None, weights: str | None) -> list[dict]:
-    import gc
+def _unload_engines(domain: str | None, weights: str | None) -> list[dict]:
     removed = []
     with _cache_lock:
-        for key in list(_model_cache):
+        for key in list(_engine_cache):
             d, w = key
             if (domain is None or d == domain) and (weights is None or w == weights):
-                del _model_cache[key]
+                engine, _tok, _lora = _engine_cache.pop(key)
+                try:
+                    _engine_loop.run(engine.shutdown())
+                except Exception as e:  # noqa: BLE001 -- best-effort teardown
+                    print(f"[unload] shutdown error for {d}/{w}: {e}", flush=True)
                 _last_used.pop(key, None)
                 removed.append({"domain": d, "weights": w})
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
     return removed
 
 
 def _idle_unload_loop() -> None:
+    if IDLE_UNLOAD_S <= 0:
+        return  # disabled -- see IDLE_UNLOAD_S docstring above
     poll_s = max(5.0, min(IDLE_UNLOAD_S / 4, 15.0))
     while True:
         time.sleep(poll_s)
         now = time.time()
-        stale = []
-        with _cache_lock:
-            for key in list(_model_cache):
-                if key == _active_key:
-                    continue
-                if now - _last_used.get(key, now) > IDLE_UNLOAD_S:
-                    stale.append(key)
+        stale = [key for key, last in list(_last_used.items()) if now - last > IDLE_UNLOAD_S]
         for domain, weights in stale:
-            removed = _unload_models(domain, weights)
+            removed = _unload_engines(domain, weights)
             if removed:
                 print(f"[idle-unload] evicted {domain}/{weights} (idle > {IDLE_UNLOAD_S:.0f}s)", flush=True)
 
@@ -114,15 +249,49 @@ def _gpu_status() -> dict:
         return {"error": str(e)}
 
 
-@torch.inference_mode()
-def _generate(tok, mdl, messages: list[dict], max_new_tokens: int, enable_thinking: bool) -> str:
-    text = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True,
+def _sampling_params(body: dict) -> SamplingParams:
+    """Builds SamplingParams from Qwen's recommended thinking/non-thinking defaults
+    (`_SAMPLING_DEFAULTS`), with any of temperature/top_p/top_k/repetition_penalty/
+    presence_penalty overridable per-request (e.g. for future quality-tuning experiments --
+    design doc Deel E step 9's gouden eval-set -- without a server redeploy)."""
+    enable_thinking = bool(body.get("enable_thinking", False))
+    params = dict(_SAMPLING_DEFAULTS[enable_thinking])
+    for key in ("temperature", "top_p", "top_k", "repetition_penalty", "presence_penalty"):
+        if key in body:
+            params[key] = body[key]
+    return SamplingParams(max_tokens=int(body.get("max_new_tokens", 400)), **params)
+
+
+def _render_prompt(tok, messages: list[dict], enable_thinking: bool) -> str:
+    return tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True,
                                    enable_thinking=enable_thinking)
-    inp = tok(text, return_tensors="pt", truncation=True, max_length=4096).to(mdl.device)
-    with _gen_lock:
-        out = mdl.generate(**inp, max_new_tokens=max_new_tokens, do_sample=False,
-                           pad_token_id=tok.eos_token_id, repetition_penalty=1.15)
-    return tok.decode(out[0][inp["input_ids"].shape[1]:], skip_special_tokens=True).strip()
+
+
+async def _agenerate_full(engine, lora, prompt: str, sp: SamplingParams) -> str:
+    text = ""
+    async for out in engine.generate(prompt=prompt, sampling_params=sp, request_id=uuid.uuid4().hex,
+                                     lora_request=lora):
+        text = out.outputs[0].text
+    return text.strip()
+
+
+def _stream_deltas(engine, lora, prompt: str, sp: SamplingParams):
+    """Synchronous generator (see `_EngineLoop.stream`) yielding incremental text deltas --
+    vLLM's `RequestOutput.outputs[0].text` is the CUMULATIVE text so far, not a delta, so this
+    tracks the previously-seen length itself."""
+    request_id = uuid.uuid4().hex
+    state = {"last_len": 0}
+
+    async def _gen():
+        async for out in engine.generate(prompt=prompt, sampling_params=sp, request_id=request_id,
+                                         lora_request=lora):
+            cur = out.outputs[0].text
+            delta = cur[state["last_len"]:]
+            state["last_len"] = len(cur)
+            if delta:
+                yield delta
+
+    yield from _engine_loop.stream(_gen)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -132,39 +301,69 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(payload).encode("utf-8"))
 
-    def do_POST(self) -> None:
+    def _read_body(self) -> dict:
         length = int(self.headers.get("Content-Length", 0))
+        return json.loads(self.rfile.read(length) or b"{}")
+
+    def do_POST(self) -> None:
         try:
-            body = json.loads(self.rfile.read(length) or b"{}")
+            body = self._read_body()
             if self.path == "/generate":
-                global _active_key
-                domain = body.get("domain", "Orchard")
-                weights = body.get("weights", "W0_base")
-                messages = body["messages"]
-                max_new_tokens = int(body.get("max_new_tokens", 400))
-                enable_thinking = bool(body.get("enable_thinking", False))
-                key = (domain, weights)
-                tok, mdl = _get_model(domain, weights)
-                _active_key = key
-                try:
-                    text = _generate(tok, mdl, messages, max_new_tokens, enable_thinking)
-                finally:
-                    _last_used[key] = time.time()
-                    _active_key = None
-                self._write_json(200, {"text": text})
+                self._handle_generate(body)
+            elif self.path == "/generate_stream":
+                self._handle_generate_stream(body)
             elif self.path == "/load":
                 domain = body.get("domain", "Orchard")
                 weights = body.get("weights", "W0_base")
-                _get_model(domain, weights)
+                _get_engine(domain, weights)
                 self._write_json(200, {"loaded": {"domain": domain, "weights": weights}})
             elif self.path == "/unload":
-                removed = _unload_models(body.get("domain"), body.get("weights"))
+                removed = _unload_engines(body.get("domain"), body.get("weights"))
                 self._write_json(200, {"unloaded": removed})
             else:
                 self.send_response(404)
                 self.end_headers()
         except Exception as e:  # noqa: BLE001 -- always report the real error back to the client
             self._write_json(500, {"error": str(e)})
+
+    def _handle_generate(self, body: dict) -> None:
+        domain = body.get("domain", "Orchard")
+        weights = body.get("weights", "W0_base")
+        enable_thinking = bool(body.get("enable_thinking", False))
+        engine, tok, lora = _get_engine(domain, weights)
+        prompt = _render_prompt(tok, body["messages"], enable_thinking)
+        sp = _sampling_params(body)
+        text = _engine_loop.run(_agenerate_full(engine, lora, prompt, sp))
+        _last_used[(domain, weights)] = time.time()
+        self._write_json(200, {"text": text})
+
+    def _handle_generate_stream(self, body: dict) -> None:
+        domain = body.get("domain", "Orchard")
+        weights = body.get("weights", "W0_base")
+        enable_thinking = bool(body.get("enable_thinking", False))
+        engine, tok, lora = _get_engine(domain, weights)
+        prompt = _render_prompt(tok, body["messages"], enable_thinking)
+        sp = _sampling_params(body)
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        full_text = ""
+        try:
+            for delta in _stream_deltas(engine, lora, prompt, sp):
+                full_text += delta
+                self.wfile.write((json.dumps({"delta": delta}) + "\n").encode("utf-8"))
+                self.wfile.flush()
+        except Exception as e:  # noqa: BLE001 -- report inline, the 200 header is already sent
+            self.wfile.write((json.dumps({"error": str(e)}) + "\n").encode("utf-8"))
+            self.wfile.flush()
+            return
+        finally:
+            _last_used[(domain, weights)] = time.time()
+        self.wfile.write((json.dumps({"done": True, "text": full_text.strip()}) + "\n").encode("utf-8"))
+        self.wfile.flush()
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
@@ -175,9 +374,10 @@ class Handler(BaseHTTPRequestHandler):
             with _cache_lock:
                 loaded = [
                     {"domain": d, "weights": w, "idle_s": round(now - _last_used.get((d, w), now), 1)}
-                    for d, w in _model_cache
+                    for d, w in _engine_cache
                 ]
-            self._write_json(200, {"gpu": _gpu_status(), "loaded_models": loaded, "idle_unload_s": IDLE_UNLOAD_S})
+            self._write_json(200, {"gpu": _gpu_status(), "loaded_models": loaded,
+                                   "idle_unload_s": IDLE_UNLOAD_S, "backend": "vllm"})
         else:
             self.send_response(404)
             self.end_headers()
@@ -187,7 +387,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"Serving on {HOST}:{PORT} (models load lazily per domain/weights on first request)", flush=True)
-    print(f"Idle auto-unload enabled: evicts a cached model after {IDLE_UNLOAD_S:.0f}s with no requests.", flush=True)
-    threading.Thread(target=_idle_unload_loop, daemon=True).start()
+    print(f"Serving on {HOST}:{PORT} (vLLM backend, models load lazily per domain/weights on first request)",
+         flush=True)
+    if IDLE_UNLOAD_S > 0:
+        print(f"Idle auto-unload enabled: evicts a cached model after {IDLE_UNLOAD_S:.0f}s with no requests.",
+             flush=True)
+        threading.Thread(target=_idle_unload_loop, daemon=True).start()
+    else:
+        print("Idle auto-unload disabled (ORCHARD_QWEN_IDLE_UNLOAD_S=0) -- model stays resident.", flush=True)
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

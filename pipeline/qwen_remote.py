@@ -28,18 +28,44 @@ DEFAULT_URL = "http://127.0.0.1:8811"
 _ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 
+# Sampling-parameter overrides accepted by both generate_remote()/stream_remote() and the
+# server's /generate(_stream) endpoints -- see cloud/qwen_inference_server.py's
+# `_SAMPLING_DEFAULTS` for Qwen's own recommended thinking/non-thinking values, used whenever
+# a parameter isn't explicitly overridden here.
+_SAMPLING_KEYS = ("temperature", "top_p", "top_k", "repetition_penalty", "presence_penalty")
+
+
+def _build_payload(messages: list[dict], domain: str, weights: str, max_new_tokens: int,
+                   enable_thinking: bool, sampling: dict) -> bytes:
+    body = {
+        "domain": domain, "weights": weights, "messages": messages,
+        "max_new_tokens": max_new_tokens, "enable_thinking": enable_thinking,
+    }
+    body.update({k: v for k, v in sampling.items() if k in _SAMPLING_KEYS and v is not None})
+    return json.dumps(body).encode("utf-8")
+
+
+def _connection_error(base_url: str, e: Exception) -> ConnectionError:
+    return ConnectionError(
+        f"Could not reach the Qwen inference server at {base_url} -- if running "
+        "locally (not on the pod itself), is the SSH tunnel open? "
+        "(ssh -N -L 8811:127.0.0.1:8811 -i <key> ubuntu@<pod-ip>)"
+    )
+
+
 def generate_remote(
     messages: list[dict], domain: str = "Orchard", weights: str = "W0_base",
     max_new_tokens: int = 400, enable_thinking: bool = False,
-    base_url: str = DEFAULT_URL, timeout_s: float = 90.0,
+    base_url: str = DEFAULT_URL, timeout_s: float = 90.0, **sampling,
 ) -> str:
     """POST a chat-style `messages` list to the Qwen inference server and return the
-    generated text. Raises ConnectionError (with an actionable hint) if the server/tunnel
-    isn't reachable, rather than hanging or returning a confusing low-level socket error."""
-    payload = json.dumps({
-        "domain": domain, "weights": weights, "messages": messages,
-        "max_new_tokens": max_new_tokens, "enable_thinking": enable_thinking,
-    }).encode("utf-8")
+    generated text (non-streaming -- used for ReACT tool-call hops, where the full text is
+    needed immediately to detect a tool-call JSON vs. a final answer; see `stream_remote()`
+    for the user-facing final-answer path). Raises ConnectionError (with an actionable hint)
+    if the server/tunnel isn't reachable, rather than hanging or returning a confusing
+    low-level socket error. `**sampling` optionally overrides any of `_SAMPLING_KEYS` (e.g.
+    `temperature=0.6`) -- otherwise the server applies Qwen's own recommended defaults."""
+    payload = _build_payload(messages, domain, weights, max_new_tokens, enable_thinking, sampling)
     req = urllib.request.Request(f"{base_url}/generate", data=payload, method="POST",
                                  headers={"Content-Type": "application/json"})
     try:
@@ -49,11 +75,42 @@ def generate_remote(
         detail = json.loads(e.read()).get("error", str(e))
         raise RuntimeError(f"Qwen inference server returned an error: {detail}") from e
     except urllib.error.URLError as e:
-        raise ConnectionError(
-            f"Could not reach the Qwen inference server at {base_url} -- if running "
-            "locally (not on the pod itself), is the SSH tunnel open? "
-            "(ssh -N -L 8811:127.0.0.1:8811 -i <key> ubuntu@<pod-ip>)"
-        ) from e
+        raise _connection_error(base_url, e) from e
+
+
+def stream_remote(
+    messages: list[dict], domain: str = "Orchard", weights: str = "W0_base",
+    max_new_tokens: int = 400, enable_thinking: bool = False,
+    base_url: str = DEFAULT_URL, timeout_s: float = 120.0, **sampling,
+):
+    """Generator twin of `generate_remote()` -- POSTs to `/generate_stream` and yields
+    incremental text deltas as they're generated (newline-delimited JSON over a
+    close-delimited HTTP response, see the server's `_handle_generate_stream()`), for
+    `st.write_stream()`-style live display. Only yields the `"delta"` lines; the final
+    `{"done": true, "text": ...}` line is consumed but not re-yielded (callers that need the
+    full assembled text should accumulate the deltas themselves, e.g. via
+    `"".join(stream_remote(...))`). Raises the same ConnectionError/RuntimeError as
+    `generate_remote()` -- note these only surface once the generator is actually iterated,
+    not at call time, since nothing runs until the first `next()`."""
+    payload = _build_payload(messages, domain, weights, max_new_tokens, enable_thinking, sampling)
+    req = urllib.request.Request(f"{base_url}/generate_stream", data=payload, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            for raw_line in resp:
+                line = raw_line.decode("utf-8").strip()
+                if not line:
+                    continue
+                obj = json.loads(line)
+                if "error" in obj:
+                    raise RuntimeError(f"Qwen inference server returned an error: {obj['error']}")
+                if "delta" in obj:
+                    yield obj["delta"]
+    except urllib.error.HTTPError as e:
+        detail = json.loads(e.read()).get("error", str(e))
+        raise RuntimeError(f"Qwen inference server returned an error: {detail}") from e
+    except urllib.error.URLError as e:
+        raise _connection_error(base_url, e) from e
 
 
 def is_remote_server_up(base_url: str = DEFAULT_URL, timeout_s: float = 3.0) -> bool:
