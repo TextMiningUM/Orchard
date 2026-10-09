@@ -13,7 +13,7 @@ Output: one JSON per document under ``Data/Orchard/Orchard_JSON/<doc_id>.json``:
       "pages": [{"page_num": 1, "text": "..."}, ...]
     }
 
-Safe to run LOCALLY (pdfplumber + BeautifulSoup, CPU-only, no GPU/API key needed). Idempotent:
+Safe to run LOCALLY (PyMuPDF + BeautifulSoup, CPU-only, no GPU/API key needed). Idempotent:
 re-parses every acquired document each run (parsing is cheap; unlike acquisition there is no
 "skip if present" check -- if the PDF text extraction logic improves, re-running should pick
 that up immediately rather than silently keeping a stale JSON).
@@ -31,8 +31,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.paths import AgentPaths  # noqa: E402
+from core.text_segmentation import join_hyphenated_linebreaks  # noqa: E402
 
-import pdfplumber  # noqa: E402
+import pymupdf  # noqa: E402
 from bs4 import BeautifulSoup  # noqa: E402
 
 # Confirmed 2026-10-08 (Fase 3): this file is English despite its /NL/ URL (EUR-Lex content
@@ -47,13 +48,26 @@ _EURLEX_BOILERPLATE_MARKERS = (
     "Skip to main content", "My EUR-Lex", "Sign in", "Quick search",
 )
 
+# PyMuPDF, NOT pdfplumber (fixed 2026-10-09, design doc Deel F #13/G.17) -- pdfplumber's
+# extract_text() sorts words primarily by vertical position across the FULL page width, which
+# interleaves a narrative column with an adjacent product/spec sidebar line-by-line into
+# semantically-broken text (confirmed directly in the Netafim adviesrapport and a BIOFRUITNET
+# factsheet's sidebar table). Auto Pilot (../Auto Pilot) hit and fixed the EXACT same problem
+# for its 2-column CHIRP newsletters/Navy yearbooks: switching to PyMuPDF's own
+# ``page.get_text("text")`` (NOT ``sort=True`` -- that mode interleaved even MORE aggressively
+# for them) follows the PDF's content-stream block order instead, which reads one column fully
+# before the next for every multi-column document tested there. Applying the same proven fix
+# here rather than re-deriving a column-detection approach from scratch.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b-\x1f]")  # non-printable font/ligature artifacts
+
 
 def _parse_pdf(path: Path) -> list[dict]:
     """Returns [{"page_num": 1, "text": "..."}, ...], one entry per non-empty page."""
     pages = []
-    with pdfplumber.open(path) as pdf:
-        for i, page in enumerate(pdf.pages, start=1):
-            text = (page.extract_text() or "").strip()
+    with pymupdf.open(path) as pdf:
+        for i, page in enumerate(pdf, start=1):
+            raw = _CONTROL_CHAR_RE.sub("", page.get_text("text") or "")
+            text = join_hyphenated_linebreaks(raw).strip()
             if text:
                 pages.append({"page_num": i, "text": text})
     return pages

@@ -157,7 +157,7 @@ def ask_orchard_advisor(
 
     sources: list[str] = []
     if rag_index is not None:
-        hits = retrieve(question, rag_index, k=4)
+        hits = retrieve(question, rag_index, k=6)
         context_block = format_context(hits)
         sources.extend(format_sources(hits))
     else:

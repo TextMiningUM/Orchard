@@ -85,6 +85,8 @@ Bronnen voor dit ontwerp:
   - [G.13 Git/GitHub en synchronisatie](#sec-g13)
   - [G.14 Chat-UX: feedback/grounding, gespreksgeheugen en bewaarde chats](#sec-g14)
   - [G.15 Boomgaard-instellingen verhuisd naar een eigen "Instellingen"-pagina](#sec-g15)
+  - [G.16 Fase 4: gerichte kennisbank-uitbreiding (10 praktijkproblemen) + retrieval-afstelling](#sec-g16)
+  - [G.17 PDF-parseerfix (PyMuPDF) + automatische RAG-chunk-kwaliteitscontrole](#sec-g17)
 
 ---
 
@@ -540,7 +542,8 @@ Hergebruik van het masterproject-document se eigen evaluatieplan, geconcretiseer
 | Actua Steenfruit vakbladartikelen (StonefruitConsult/Delphy/Caf/Fruitconsult, Wageningen) | `Data/Data Log Books/Actua steenfruit #6 en #7 2026.pdf` | Aanwezig, tekst succesvol geëxtraheerd; zeer bruikbaar als "levend" vakkennis-voorbeeld (koude-uren, snoei-technieken, bespuitingstiming, bestuiving) |
 | Masterproject-briefing | `Docs/Training an Orchard Agentic Chatbot...pdf` | Gelezen, dit ontwerp volgt de scope direct |
 | World Bank AI-in-landbouw rapport | `Docs/Harnessing Artificial Intelligence for Agricultural Transformation...pdf` | Gelezen (voor bredere motivatie/context; geen kersen-specifieke data) |
-| **Track 1-kennisbank (Fase 2, zie [G.5](#sec-g5))** | `Data/Orchard/OrchardKnowledge/<categorie>/*.pdf`/`.html` + `manifest.json` | **7 documenten acquired, 3 bewust geblokkeerd-en-gedocumenteerd, 0 failed.** WUR: `wur_teelthandleidingen_139993.pdf`, `wur_onderstammenproef_zoete_kers_297528.pdf`, `biofruitnet_zoete_kers_onderstammen_nl.pdf` (EU Horizon 2020-project, niet WUR zelf maar in dezelfde map). USDA: `usda_agriculture_handbook_442_sweet_cherries_1973.pdf` (1973, GovInfo, public domain — vervangt de niet-gevonden pre-1930 Farmers' Bulletin 776). Overig: `netafim_kersen_buiten_adviesrapport_2021.pdf` (commercieel, expliciet als zodanig gelabeld), `osu_em9267_spotted_wing_drosophila.pdf` (Oregon State University Extension, Engelstalig, grondt de suzukii-risicofunctie). Geblokkeerd: Ctgb-bulk-export (dode URL), Actua Steenfruit-archief (alleen de 2 al-bezeten nummers, rest achter inlogmuur), pre-1930 USDA-bulletin (geen werkende link gevonden, niet geforceerd). **Bekend, nog open issue**: de eerst-gedownloade EU 2018/848-pagina bleek per ongeluk Engelstalig (zie [Deel F](#deel-f) punt 8) en is expliciet uitgesloten van de RAG-index. |
+| **Track 1-kennisbank (Fase 2+4, zie [G.5](#sec-g5)/[G.16](#sec-g16))** | `Data/Orchard/OrchardKnowledge/<categorie>/*.pdf`/`.html` + `manifest.json` | **21 documenten acquired, 3 bewust geblokkeerd-en-gedocumenteerd, 0 failed.** Fase 2: WUR `wur_teelthandleidingen_139993.pdf`, `wur_onderstammenproef_zoete_kers_297528.pdf`; USDA `usda_agriculture_handbook_442_sweet_cherries_1973.pdf` (1973, Engelstalig); `netafim_kersen_buiten_adviesrapport_2021.pdf` (commercieel); `osu_em9267_spotted_wing_drosophila.pdf` (Engelstalig); `biofruitnet_zoete_kers_onderstammen_nl.pdf`. Fase 4 ([G.16](#sec-g16), 2026-10-09): 14 extra Nederlandstalige praktijkbronnen gericht op de 10 meest voorkomende kersenteelt-problemen (Monilia, bacteriekanker/hagelschot, kersenvlieg, zwarte kersenluis, bladvlekkenziekte, vogelschade, vorstberegening, bestuiving/rassenkeuze) — 2 extra BIOFRUITNET-factsheets + 12 HTML-bronnen (WUR/EU-niveau waar mogelijk, anders commerciële/teler-praktijkbronnen, expliciet zo gelabeld). Geblokkeerd: Ctgb-bulk-export (dode URL), Actua Steenfruit-archief (inlogmuur), pre-1930 USDA-bulletin (geen werkende link), pcfruit.be kennisdatabank (inlogmuur/leeg zonder lidmaatschap, zie [G.16](#sec-g16)). **Bekend, nog open issue**: de eerst-gedownloade EU 2018/848-pagina bleek per ongeluk Engelstalig (zie [Deel F](#deel-f) punt 8) en is expliciet uitgesloten van de RAG-index; meerdere PDF's hebben vermoedelijk kolom-interleaving-parseproblemen (zie [Deel F](#deel-f) punt 13, nog niet opgelost). |
+
 
 <a id="sec-c2"></a>
 ## C.2 Nederlandse / Wageningen-bronnen (open data)
@@ -849,8 +852,87 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
     zijn (goed gegrond) en toch een verkeerde conclusie trekken uit de aangeleverde data, of "rood"
     zijn voor een onschuldige, algemene uitspraak die geen grounding nodig had. Dit moet in de UI
     duidelijk blijven (geen vals gevoel van zekerheid).
+13. **PDF-tekstextractie moet per document steekproefsgewijs gelezen worden, niet alleen
+    "lukte het parsen"-gecontroleerd** (ontdekt 2026-10-09 door de gebruiker, bij het Netafim-
+    adviesrapport): een pagina met een lopende tekstkolom naast een productsidebar kan door
+    `pdfplumber`'s standaard `extract_text()` door elkaar gehusseld worden tot onzinnige, semantisch
+    kapotte tekst (zinnen die halverwege afbreken in een productnaam uit de andere kolom). Dit is
+    een REQUIREMENT geworden (zie ook `.github/copilot-instructions.md`): elk nieuw/bestaand
+    Track 1-document moet steekproefsgewijs handmatig gelezen worden in de geparste JSON-vorm
+    (`Data/Orchard/Orchard_JSON/`) vóór het vertrouwd wordt in de RAG-index — status "N pagina's
+    geparsed" alleen zegt niets over leesbaarheid. **OPGELOST, zie [G.17](#sec-g17)** —
+    overgestapt op PyMuPDF (zelfde fix als Auto Pilot al had, zie hieronder).
+14. **Observation-Action-Consequence(-Why/Worst-case)-tuples nog niet geëxtraheerd**
+    (voorgesteld door de gebruiker, 2026-10-09): zowel het logboek (Track 2) als de inmiddels
+    uitgebreide literatuur (Track 1, zie [G.16](#sec-g16)) bevatten impliciet dit patroon, maar
+    het is nergens expliciet gestructureerd. **Logboek**: een ingreep-regel (observatie + actie)
+    moet gekoppeld worden aan het GEVOLG — meestal af te leiden uit latere regels in dezelfde
+    categorie (kwam het probleem terug = mislukte timing/middel, of bleef het weg = succes).
+    **Literatuur**: bronnen bevatten vaak expliciete "doe dit niet, want..."-waarschuwingen (bv.
+    "verwijder Monilia-vruchtmummies, nooit op de composthoop" — het worst-case-scenario staat er
+    letterlijk bij). Beide zijn een los extractiescript-project, bedoeld als structureel invoer
+    voor een toekomstige SFT/DPO-trainingsronde (zie [Deel E](#deel-e) stap 5-7) — **nog niet
+    gestart**.
+15. **Procedurele grafen (meerstaps-workflows) nog niet afgeleid** — Auto Pilot heeft hier al
+    een werkend, direct overdraagbaar patroon voor (`../Auto Pilot/pipeline/ingest/build_pg.py`,
+    "Procedural Graph over de reasoning traces", Lu et al. 2026-stijl): een volledig
+    deterministische (geen LLM) graaf van `(stap, NEXT, stap)`-triples, gemined uit geordende
+    `procedures`-lijsten, met drie edge-attributen — `condition` (wanneer geldt deze overgang),
+    `guidance` (hoe/waarom de volgende stap te nemen) en `pitfalls` (wat te vermijden, exact het
+    "wat was het slechtste om te doen"-idee uit punt 14 hierboven). Stap-acties worden over
+    meerdere bronnen heen gecanonicaliseerd via embedding-gelijkenis (greedy clustering), en
+    identieke overgangen uit meerdere documenten/logboekregels smelten samen met een
+    support-telling (hoe vaker eenzelfde volgorde bevestigd wordt, hoe zwaarder die telt). Voor
+    Orchard zou een ingreep (bv. "Monilia bestrijden": snoei zieke delen → gereedschap
+    ontsmetten → mummies verwijderen+afvoeren → fungicide bij juiste BBCH-stadium → herhalen bij
+    aanhoudend nat weer) zo'n procedure-reeks worden, gemined uit zowel de literatuur (nu
+    uitgebreid, zie [G.16](#sec-g16)) als het logboek. **Nog niet gestart** — directe
+    portering van `build_pg.py` naar dit domein is de aangewezen aanpak, niet opnieuw ontwerpen.
+16. **Kennisgraaf (Knowledge Graph) voor complexe, onderling verbonden elementen nog niet
+    gebouwd** — ook hiervoor heeft Auto Pilot al een werkend patroon
+    (`../Auto Pilot/pipeline/ingest/build_kg.py`, "Tutorial 13 § 8"): GEEN klassieke
+    subject-predicate-object-triplestore, maar een inverted-index-achtige graaf bovenop de
+    bestaande RAG-chunks — concept→chunk_ids, concept↔concept co-occurrence (gewogen),
+    topic→chunk_ids, document→chunk_ids, chunk↔chunk-adjacentie binnen een hoofdstuk/sectie, en
+    een alias→concept-woordenboek voor query-normalisatie (bv. "dsc alert" → `["DSC",
+    "Channel 70"]` bij Auto Pilot; voor Orchard zou dat bv. "kersenvlieg" → `["Rhagoletis
+    cerasi"]` of "hagelschot" → `["Stigmina carpophila", "Pseudomonas syringae"]` worden).
+    Ondersteunt hybride retrieval (dense embeddings + graaf-expansie) — met een smoke-test die
+    specifiek de queries print waar dense-only retrieval op vastliep (zelfde diagnostische
+    aanpak als [G.16](#sec-g16) hierboven al informeel deed). Voor Orchard zou dit de nu
+    verspreide relaties (weer → ziekte/plaag → product/dosering/timing → rasgevoeligheid →
+    seizoensfase) in één doorzoekbare structuur kunnen samenbrengen i.p.v. losse Python-functies
+    (`orchard_disease_weather_links.py`, `orchard_middelen.py`, `orchard_phenology_spec.py`).
+    **Nog niet gestart** — directe portering van `build_kg.py` is de aangewezen aanpak.
+17. **Reward-functie voor toekomstige optimalisatie (bv. RL/DPO-achtige training) nog niet
+    ontworpen**: er is nu een eenvoudig voorkeurssignaal (duim omhoog/omlaag, zie [G.14](#sec-g14))
+    maar geen geëxpliciteerde reward-functie die meerdere doelen afweegt (bv. feitelijke
+    juistheid/grounding, veiligheid rond doseringen, bruikbaarheid/beknoptheid, en op termijn
+    mogelijk ECHTE opbrengst-/oogstuitkomsten). Zonder zo'n expliciet ontwerp blijft optimalisatie
+    beperkt tot losse DPO-voorkeursparen zonder een gewogen, samengesteld doel. **Nog niet
+    gestart** — op de lijst voor een volgende versie, te ontwerpen zodra er genoeg feedback-
+    volume is om zinvol tegen te optimaliseren.
+18. **RAG-chunking is nu nog een simpele, per-pagina woordenteller-pack — Auto Pilot's eigen
+    `pipeline/ingest/build_rag.py` doet dit merkbaar slimmer** en is een directe kandidaat om
+    over te nemen: (a) secties worden daar PER DOCUMENT (niet per pagina) opgebouwd, zodat een
+    alinea die een paginagrens overschrijdt niet kunstmatig wordt afgekapt — Orchard chunkt nu
+    nog strikt binnen één `page["text"]` tegelijk; (b) een sectie wordt pas gesplitst na een
+    embedding-based topic-boundary-detectie (Hearst 1997 TextTiling-depth-score op
+    zinsembeddings, adaptieve percentiel-drempel per sectie), niet blind op een vast
+    woordenaantal; (c) kleine, verwante buursecties worden intelligent SAMENgevoegd tot het
+    token-budget, geblokkeerd door een adaptieve ondergrens op de boundary-embedding-gelijkenis
+    (voorkomt dat twee toevallig gelijk-gelabelde maar inhoudelijk ongerelateerde stukken
+    samensmelten); (d) bepaalde type's (`rule`, `definition`, `procedure`, ...) zijn altijd
+    precies ÉÉN chunk, nooit gesplitst of samengevoegd; (e) een losse filter verwijdert
+    "degenerate" chunks (minder dan 2 alfabetische woorden — paginanummers, kale opsommingstekens)
+    vóórdat ze de RAG-index bereiken. **Nog niet gestart** — gezien de huidige kennisbank-schaal
+    (21 documenten, ~390 chunks) is dit bewust geen blokkerende prioriteit geweest (zie
+    [G.17](#sec-g17) voor de twee lagere-moeite fixes die WEL al zijn doorgevoerd: PyMuPDF i.p.v.
+    pdfplumber, en de perplexity-gebaseerde chunk-kwaliteitscontrole), maar wordt waardevoller
+    naarmate de kennisbank groeit.
 
 ---
+
 
 <a id="deel-g"></a>
 # Deel G — Implementatiestatus (chronologisch verslag van wat werkelijk gebouwd is)
@@ -1256,3 +1338,126 @@ beeld zonder te scrollen. Opgelost in twee stappen (de eerste bleek nog niet ver
   de omringende multipage-navigatiecontext te simuleren, dus `page_link`/`switch_page` kunnen
   daar niet getest worden. Niet verder nagejaagd omdat stap 2 hierboven `page_link` toch weer
   overbodig maakte.
+
+<a id="sec-g16"></a>
+## G.16 Fase 4: gerichte kennisbank-uitbreiding (10 praktijkproblemen) + retrieval-afstelling
+
+**Aanleiding**: de gebruiker testte "Vraag de Adviseur" met een lijst van tien klassieke
+kersenteelt-problemen (nachtvorst tijdens bloei, slechte bestuiving, Monilia, zwarte
+kersenluis, kersenvlieg, suzuki-fruitvlieg, vruchtbarsten, vogelschade, bacteriekanker,
+bladvlekkenziekte) en kreeg vage, nergens-op-gegronde antwoorden. Voordat er iets aan het
+model/de prompt werd veranderd, is dit eerst **empirisch gediagnosticeerd**:
+
+- Een directe RAG-retrieval-test voor alle vijf eerst-geteste onderwerpen leverde bijna
+  uitsluitend fragmenten op uit **één Engelstalig document uit 1973** (USDA Handbook 442), met
+  voor de meeste onderwerpen zelfs NEGATIEVE cross-encoder-relevantiescores (-1 tot -2,7) — in de
+  praktijk "dit fragment gaat hier niet over". De kennisbank bevatte toen maar 7 echt bruikbare
+  documenten; niets behandelde specifiek kersenvlieg (Rhagoletis cerasi — iets anders dan
+  suzuki-fruitvlieg), zwarte kersenluis, bladvlekkenziekte, vogelschade, of Nederlandstalige
+  Monilia/bacteriekanker-bestrijding.
+- Conclusie: fine-tunen zou dit NIET oplossen (SFT/DPO verandert stijl/gedrag, niet
+  feitenkennis die er niet is) — de kennisbank moest eerst uitgebreid worden. Zie ook de
+  bijgewerkte roadmap-prioritering in [Deel E](#deel-e)/[Deel F](#deel-f).
+
+**Uitgevoerd** (`pipeline/ingest/build_orchard_corpus.py` SOURCES-registry uitgebreid,
+2026-10-09): 14 nieuwe, stuk voor stuk met een HTTP-request geverifieerde bronnen toegevoegd
+(status 200, geen inlogmuur) — 2 extra BIOFRUITNET-praktijksamenvattingen (zelfde
+EU Horizon 2020-reeks als de al-aanwezige onderstammen-factsheet: zwarte kersenluis +
+aanbevolen rassen) en 12 Nederlandstalige HTML-bronnen (Bayer CropScience, Koppert, Baldur-
+Nederland, Fruitbomen.net, Organic Farm Knowledge, AgruniekRijnvallei-tenlersnieuwsbrief,
+FruitSecurity Holland, Oosterom Kersen — een ECHTE Nederlandse kersenteler, Bomenenzo).
+Commerciële bronnen zijn expliciet als zodanig gelabeld in hun `note`-veld (zelfde
+"niet als onafhankelijk onderzoeksinstituut citeren"-discipline als de Netafim-bron). Eén
+kandidaat-bron bleek NIET bruikbaar: **pcfruit.be's "kennisdatabank"** (het Vlaamse
+Proefcentrum Fruitteelt) gaf bij een geautomatiseerde fetch alleen lidmaatschaps-wervingstekst
+en een cookie-dialoog terug, geen artikel-inhoud — ofwel een inlogmuur, ofwel client-side
+JavaScript-rendering; niet verder geforceerd, zelfde discipline als de eerdere
+Actua-Steenfruit/Ctgb-blokkades.
+
+**Resultaat**: kennisbank van 10 → 21 geaccepteerde documenten, RAG-index van 347 → 397
+chunks. Retrieval voor dezelfde vijf onderwerpen die eerst faalden, opnieuw getest: Monilia,
+bacteriekanker/hagelschot, kersenvlieg en zwarte kersenluis scoren nu allemaal **sterk
+positief** (score +2 tot +8,6) met de juiste, specifieke Nederlandstalige bron als
+nummer 1 resultaat (in plaats van een zwak/negatief scorend Engels fragment uit 1973). Een
+volledige end-to-end test van `ask_orchard_advisor()` op de Monilia-vraag leverde een
+substantieel, correct, groen-gegrond antwoord met 5 echte bronverwijzingen op (tegenover de
+eerdere vage non-antwoorden).
+
+**Retrieval-afstelling** (`pipeline/orchard_rag.py::retrieve()`): tijdens het testen bleken
+twee van de nieuw toegevoegde, overduidelijk relevante bronnen (vogelschade, vorstberegening)
+ALSNOG niet in de top-resultaten te verschijnen — niet omdat de inhoud ontbrak, maar omdat hun
+beste fragment op rank 28 resp. 43 viel terwijl de dense-kandidatenpool (`pool_n`) nog op 25
+stond (een instelling die paste bij de oude, kleinere kennisbank). `pool_n` is verhoogd naar
+**60** en de agent's eigen `k` (aantal fragmenten dat in de prompt komt) van 4 naar **6** — na
+deze wijziging scoorden beide onderwerpen meteen de juiste bron als nummer 1 resultaat. Een
+derde onderwerp (bestuiving/rassenkeuze) bleef zwakker scoren ondanks aanwezige, relevante
+inhoud (BIOFRUITNET-rassenfactsheet) — vermoedelijk gerelateerd aan hetzelfde kolom-
+interleaving-parseprobleem dat de gebruiker apart meldde (zie [Deel F](#deel-f) punt 13,
+nog niet opgelost): een chunk vol doorelkaar-gehusselde tabeldata reranked merkbaar slechter
+dan lopende prosetekst.
+
+**Nog niet gedaan** (op het moment van schrijven van deze sectie): de PDF-kolom-interleaving-
+parseproblemen zelf oplossen (Deel F #13) en een systematische
+Observation-Action-Consequence(-Why/Worst-case)-tuple-extractie uit zowel het logboek als deze
+nu uitgebreide literatuur (voorgesteld door de gebruiker, zie [Deel F](#deel-f) #14) — de eerste
+is inmiddels opgelost, zie [G.17](#sec-g17) hieronder; de tweede staat nog gepland.
+
+<a id="sec-g17"></a>
+## G.17 PDF-parseerfix (PyMuPDF) + automatische RAG-chunk-kwaliteitscontrole
+
+**Diagnose**: de gebruiker herkende het Netafim-adviesrapport-fragment uit [G.16](#sec-g16) als
+een klassiek twee-kolommen-PDF-parseprobleem en vroeg: hebben we dit niet al eens in Auto Pilot
+gehad? Dat bleek zo te zijn.
+
+**De fix (direct overgenomen van Auto Pilot, niet opnieuw ontworpen)**: Auto Pilot
+(`../Auto Pilot/pipeline/ingest/build_chirp_json.py`, `build_captain_navy_yearbooks_json.py`)
+had exact hetzelfde probleem met zijn 2-koloms CHIRP-nieuwsbrieven/Navy-jaarboeken: `pdfplumber`'s
+`extract_text()` sorteert woorden primair op verticale positie over de VOLLE paginabreedte, wat
+een linker- en rechterkolom regel-voor-regel door elkaar husselt (daar letterlijk bevestigd: twee
+ongerelateerde kolommen aaneengesmeed tot één onzinnige zin). Hun oplossing was overstappen op
+**PyMuPDF** (`pymupdf`/`fitz`)'s `page.get_text("text")` — expliciet ZONDER `sort=True` (die
+modus husselde daar juist nog agressiever) — wat de eigen content-stream-blokvolgorde van de PDF
+volgt en zo voor elk geteste document eerst de volledige linkerkolom leest, dan pas de
+rechterkolom. Daarnaast passen ze `join_hyphenated_linebreaks()` toe (regex `(\w)-\n(?=[a-z])` →
+`\1`) om woorden die een PDF's eigen regelafbreking in tweeën hakte weer aan elkaar te plakken.
+
+Exact dezelfde fix toegepast in `pipeline/ingest/parse_orchard_documents.py::_parse_pdf()`
+(nieuwe gedeelde helper `core/text_segmentation.py::join_hyphenated_linebreaks()`, zelfde
+module-naam/-locatie als Auto Pilot op doel). Resultaat, handmatig geverifieerd op zowel het
+Netafim-rapport als de BIOFRUITNET-zwarte-kersenluis-factsheet (die een vergelijkbare
+sidebar-tabel had): beide lezen nu volledig vloeiend en coherent, geen enkel fragment meer dat
+halverwege een woord naar een andere kolom springt.
+
+**Automatische kwaliteitscontrole** (`pipeline/ingest/check_rag_chunk_quality.py`, nieuw): om het
+"lees een steekproef, bevestig dat het klopt"-vereiste uit [Deel F](#deel-f) #13 te
+automatiseren in plaats van puur handmatig te blijven doen, scoort dit script elke RAG-chunk op
+next-token-predictie-perplexiteit onder een klein, taal-passend causaal taalmodel
+(`GroNLP/gpt2-small-dutch` voor Nederlandse chunks, `distilgpt2` voor Engelse — bewust
+taalbewust: een Nederlandse chunk scoren met een Engels model zou vloeiend Nederlands onterecht
+als "kapot" bestempelen). Idee: kapotte, door elkaar gehusselde tekst voorspelt zichzelf
+inherent slecht (hoge perplexiteit), vloeiend proza voorspelt zichzelf goed (lage perplexiteit).
+Resultaat, empirisch bevestigd met een vóór/na-vergelijking:
+- VÓÓR de PyMuPDF-fix: de chunks met de hoogste perplexiteit waren overduidelijk kapot —
+  letterlijke voorbeelden als "...ra ja N gen..." en "these have limited and temporary value
+  though not adopted as a standard management or are almost prohibitive in cost. Control can
+  practice. be obtained by scree" (twee onsamenhangende kolom-fragmenten aaneengeplakt).
+- NA de fix: dezelfde top-25 bevat geen kolom-interleaving-garbage meer — de resterende hoogst
+  scorende chunks zijn ofwel legitiem-maar-ongebruikelijke tekst (titelpagina's,
+  auteursnamen, literatuurlijsten — vals-positief voor een klein taalmodel, maar inhoudelijk
+  prima) ofwel een APART probleem: HTML-paginachrome (een fruit-categorie-navigatiemenu, een
+  webshop-bestel-/sorteerbalk) die niet door de generieke script/style/nav/header/footer-tag-
+  strip in `_parse_html()` werd gevangen omdat deze sites die chrome niet in zo'n semantische
+  tag verpakken.
+- Voor die laatste categorie: 6 specifieke chunk-id's (2 per document, uit
+  `fruitbomen_net_bladvlekkenziekte`, `fruitbomen_net_hagelschotziekte`,
+  `puurvantveld_kersenvlieg`) zijn handmatig bevestigd als zuivere ruis (nul inhoudelijke
+  waarde) en expliciet uitgesloten via een nieuwe, gedocumenteerde `EXCLUDED_CHUNK_IDS`-set in
+  `build_orchard_rag.py` (zelfde "eerlijk gedocumenteerde uitsluiting"-discipline als
+  `SKIP_FROM_RAG`, nu op chunk- i.p.v. documentniveau).
+- Resultaat: kennisbank-index van 389 → 383 chunks na uitsluiting. Een hernieuwde retrieval-test
+  op alle tien praktijkonderwerpen uit [G.16](#sec-g16) bevestigt geen regressie — elk onderwerp
+  haalt nog steeds de juiste bron als nummer 1 resultaat op.
+
+**Afhankelijkheid toegevoegd**: `pymupdf` (vervangt `pdfplumber` in `requirements.txt`),
+`transformers`/`torch` nu ook expliciet vermeld (al transitief aanwezig via
+`sentence-transformers`, nu ook rechtstreeks gebruikt door de kwaliteitscontrole).

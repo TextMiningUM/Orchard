@@ -95,12 +95,19 @@ def _cap_per_document(hits: list[dict], max_per_document: int) -> list[dict]:
     return out
 
 
-def retrieve(query: str, index: RagIndex, k: int = 5, pool_n: int = 25,
+def retrieve(query: str, index: RagIndex, k: int = 5, pool_n: int = 60,
              rerank: bool = True, max_per_document: int = RAG_MAX_PER_DOCUMENT) -> list[dict]:
     """Returns up to `k` chunk records (each the chunk dict + a `score` field), best first.
     Dense search always runs; a cross-encoder rerank pass narrows the `pool_n` dense hits down to
     `k` whenever `rerank` is True AND a reranker was loaded (silently falls back to dense-only
-    ranking otherwise, same graceful-degradation posture as the rest of this module)."""
+    ranking otherwise, same graceful-degradation posture as the rest of this module).
+
+    `pool_n=60` (raised from 25 on 2026-10-09, Fase 4 corpus-uitbreiding): with ~400 chunks across
+    20 documents, a genuinely relevant chunk for a narrower topic (e.g. a single HTML page about
+    vogelschade) can rank outside the top 25 purely on cosine similarity even though it is clearly
+    the best match once reranked -- confirmed empirically (rank 28-43) while diagnosing why some
+    newly-added sources weren't surfacing. A wider pool costs a few extra reranker calls (still
+    well under a second on CPU) but meaningfully improves recall for narrow/single-source topics."""
     dense_hits = _dense_search(index, query, pool_n)
     if rerank and index.reranker is not None:
         pairs = [(query, index.chunk_by_id[cid]["text"]) for cid, _ in dense_hits]

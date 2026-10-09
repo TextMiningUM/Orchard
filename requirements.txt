@@ -7,9 +7,12 @@ plotly>=5.24
 pytest>=8.3
 
 # Fase 2/3: Track 1 RAG-pipeline (corpus parsing/chunking/embedding/reranking). CPU-only
-# locally is fine at this corpus size (~7 documents); the live chat's final generation step
+# locally is fine at this corpus size (~20 documents); the live chat's final generation step
 # still goes through the cloud Qwen3-8B server (pipeline/qwen_remote.py), not these packages.
-pdfplumber>=0.11
+pymupdf>=1.24   # PDF text extraction -- NOT pdfplumber, see .github/copilot-instructions.md
+                # (pdfplumber interleaves multi-column PDFs; same lesson Auto Pilot already paid for)
 beautifulsoup4>=4.12
 lxml>=5.3
 sentence-transformers>=3.0
+transformers>=4.40   # also used directly by pipeline/ingest/check_rag_chunk_quality.py (perplexity QA)
+torch>=2.2

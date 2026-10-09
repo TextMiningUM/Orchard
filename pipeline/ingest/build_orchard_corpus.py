@@ -183,6 +183,157 @@ SOURCES: list[SourceSpec] = [
              "als de eerdere FB1399-misser: nooit een gesuggereerde ID vertrouwen zonder "
              "de gedownloade inhoud te verifiëren).",
     ),
+    # -- Fase 4: gerichte uitbreiding rond de 10 meest voorkomende praktijkproblemen ------
+    # (2026-10-09, derde sessie) -- aanleiding: de gebruiker testte de Adviseur met een lijst
+    # van tien klassieke kersenteelt-problemen (nachtvorst, bestuiving, Monilia, zwarte
+    # kersenluis, kersenvlieg, suzuki-fruitvlieg, vruchtbarsten, vogelschade, bacteriekanker,
+    # bladvlekkenziekte) en kreeg vage, niet-gegronde antwoorden -- empirisch bevestigd (RAG-
+    # retrieval-test) dat de kennisbank hier vrijwel niets specifieks over bevatte. Elke URL
+    # hieronder is deze sessie (2026-10-09) handmatig met een HTTP-request geverifieerd
+    # (status 200, geen inlogmuur-redirect). Commerciële bronnen (Bayer/Koppert/leveranciers)
+    # zijn bewust gelabeld als zodanig in de `note` -- zelfde "niet als onafhankelijk
+    # onderzoeksinstituut-niveau citeren"-discipline als de Netafim-bron hierboven.
+    SourceSpec(
+        id="biofruitnet_zwarte_kersenluis",
+        title="Zwarte kersenluis: Beheersing in de biologische teelt van zoete kers (BIOFRUITNET)",
+        category="wur_groenkennisnet",
+        url="https://biofruitnet.eu/wp-content/uploads/2023/04/70a.-PA_Zwarte-kersenluis-Beheersing-in-de-biologische-teelt-van-zoete-kers_NL.pdf",
+        filename="biofruitnet_zwarte_kersenluis_nl.pdf",
+        language="nl", status="to_fetch",
+        note="Zelfde EU Horizon 2020 BIOFRUITNET-reeks als de al-aanwezige onderstammen-"
+             "factsheet -- directe, Nederlandstalige herkenning/beheersing van Myzus cerasi.",
+    ),
+    SourceSpec(
+        id="biofruitnet_aanbevolen_rassen",
+        title="Zoete kers: Aanbevolen rassen voor de biologische teelt (BIOFRUITNET)",
+        category="wur_groenkennisnet",
+        url="https://biofruitnet.eu/wp-content/uploads/2023/04/75.PA_Zoete_kers_aanbevolen_rassen_biologische_teelt_NL.pdf",
+        filename="biofruitnet_aanbevolen_rassen_nl.pdf",
+        language="nl", status="to_fetch",
+        note="Zelfde BIOFRUITNET-reeks -- rassenkeuze i.r.t. Monilia/vruchtrot-gevoeligheid en "
+             "bestuivingscompatibiliteit (S-allelen), aanvullend op de bestuivingslijst hieronder.",
+    ),
+    SourceSpec(
+        id="agruniekrijnvallei_pseudomonas_hagelschot",
+        title="Pseudomonas- en hagelschotbeheersing (AgruniekRijnvallei nieuwsbrief klein- en steenfruit)",
+        category="teelt_praktijk",
+        url="https://www.agruniekrijnvallei.nl/nieuwsbrief-items/nieuwsbrief-klein-en-steenfruit-25-maart-2024/pseudomonas-en-hagelschotbeheersing/",
+        filename="agruniekrijnvallei_pseudomonas_hagelschot_nl.html",
+        language="nl", status="to_fetch",
+        note="Praktijkgerichte teler-nieuwsbrief van een Nederlandse landbouw-coöperatie -- "
+             "bacteriekanker (Pseudomonas syringae) + hagelschotziekte herkennen en beheersen.",
+    ),
+    SourceSpec(
+        id="baldur_bacteriekanker_kersen",
+        title="Bacteriekanker (Pseudomonas Syringae) bij kersen (BALDUR-Nederland plantendokter)",
+        category="ziekten_plagen",
+        url="https://www.baldur-nederland.nl/onion/content/plantendokter/steenfruit/bacteriekanker-(pseudomonas-syringae)-bij-kersen",
+        filename="baldur_bacteriekanker_kersen_nl.html",
+        language="nl", status="to_fetch",
+        note="Commerciële kwekerij-plantendokterpagina -- herkenning/preventie bacteriekanker, "
+             "aanvullend op de AgruniekRijnvallei-bron hierboven.",
+    ),
+    SourceSpec(
+        id="fruitbomen_net_hagelschotziekte",
+        title="Hagelschotziekte bij kersen, pruimen, perziken en abrikozen (Fruitbomen.net)",
+        category="ziekten_plagen",
+        url="https://fruitbomen.net/informatie/ziekten-en-plagen/ziekten/hagelschotziekte",
+        filename="fruitbomen_net_hagelschotziekte_nl.html",
+        language="nl", status="to_fetch",
+        note="Nederlandstalige fruitbomen-encyclopedie, vrij toegankelijk -- herkenning/"
+             "bestrijding hagelschotziekte (Stigmina carpophila, samenhangend met bacteriekanker).",
+    ),
+    SourceSpec(
+        id="fruitbomen_net_bladvlekkenziekte",
+        title="Bladvlekkenziekte bij pruimen- en kersenbomen (Fruitbomen.net)",
+        category="ziekten_plagen",
+        url="https://fruitbomen.net/informatie/ziekten-en-plagen/ziekten/bladvlekkenziekte-kers",
+        filename="fruitbomen_net_bladvlekkenziekte_nl.html",
+        language="nl", status="to_fetch",
+        note="Zelfde encyclopedie -- Blumeriella jaapii-bladvlekkenziekte, vroegtijdige bladval.",
+    ),
+    SourceSpec(
+        id="organic_farmknowledge_bladvlekkenziekte",
+        title="Hoe herken en bestrijd je kersenbladvlekkenziekte (Blumeriella jaapii) (Organic Farm Knowledge)",
+        category="ziekten_plagen",
+        url="https://organic-farmknowledge.org/nl/tool/56835",
+        filename="organic_farmknowledge_bladvlekkenziekte_nl.html",
+        language="nl", status="to_fetch",
+        note="EU-gefinancierd biologische-landbouw-kennisplatform (vergelijkbaar niveau als "
+             "BIOFRUITNET) -- praktijk-'tool'-pagina specifiek voor biologische teelt.",
+    ),
+    SourceSpec(
+        id="bayer_monilia_vruchtrot",
+        title="Monilinia Vruchtrot / Tak- en bloesemsterfte bij kersen (Bayer CropScience)",
+        category="ziekten_plagen",
+        url="https://www.cropscience.bayer.be/nl/ziekten-onkruiden-insecten/ziekten/monilia-vruchtrot",
+        filename="bayer_monilia_vruchtrot_nl.html",
+        language="nl", status="to_fetch",
+        note="Commercieel (Bayer CropScience) -- herkenning/levenscyclus Monilinia laxa/fructigena. "
+             "Niet als onafhankelijk onderzoeksinstituut citeren, alleen als aanvullende herkenning.",
+    ),
+    SourceSpec(
+        id="koppert_monilinia_bruinrot",
+        title="Monilinia of bruinrot van fruit -- preventie, bestrijding en schade (Koppert)",
+        category="ziekten_plagen",
+        url="https://www.koppert.be/ziektebestrijding/monilinia-or-brown-rot-of-fruit/",
+        filename="koppert_monilinia_bruinrot_nl.html",
+        language="nl", status="to_fetch",
+        note="Commercieel (Koppert Biological Systems) -- biologische-bestrijding-invalshoek op "
+             "Monilia, aanvullend op de Bayer-bron hierboven.",
+    ),
+    SourceSpec(
+        id="bayer_kersenluis_zwarte",
+        title="Kersenluis zwarte (Myzus cerasi) (Bayer agro.bayer.nl)",
+        category="ziekten_plagen",
+        url="https://agro.bayer.nl/diagnose/plagen/kersenluis-zwarte",
+        filename="bayer_kersenluis_zwarte_nl.html",
+        language="nl", status="to_fetch",
+        note="Commercieel (Bayer) -- herkenning/schadebeeld zwarte kersenluis, aanvullend op de "
+             "BIOFRUITNET-factsheet hierboven.",
+    ),
+    SourceSpec(
+        id="puurvantveld_kersenvlieg",
+        title="Kersenvlieg bestrijden -- 100% natuurlijk (Puur van 't Veld)",
+        category="ziekten_plagen",
+        url="https://www.puurvantveld.eu/Kersenvlieg",
+        filename="puurvantveld_kersenvlieg_nl.html",
+        language="nl", status="to_fetch",
+        note="Nederlandstalige pagina specifiek over Rhagoletis cerasi (kersenvlieg, NIET suzuki-"
+             "fruitvlieg) -- herkenning + gele vangplaten/feromoonvallen-aanpak. Commercieel "
+             "(verkoopt vallen), maar herkenningsinfo is feitelijk/overeenkomend met andere bronnen.",
+    ),
+    SourceSpec(
+        id="fruitsecurityholland_vogelschade",
+        title="Hoe bescherm ik mijn fruit tegen vogels? (FruitSecurity Holland)",
+        category="teelt_praktijk",
+        url="https://www.fruitsecurityholland.com/nl/hoe-bescherm-ik-mijn-fruit-tegen-vogels/l526c13",
+        filename="fruitsecurityholland_vogelschade_nl.html",
+        language="nl", status="to_fetch",
+        note="Commercieel (vogelnetten-leverancier) -- praktische vogelschade-beheersing "
+             "(netten/frames/maaswijdte), onderwerp dat verder nergens in de kennisbank voorkwam.",
+    ),
+    SourceSpec(
+        id="oosteromkersen_nachtvorst",
+        title="Nachtvorst bestrijding (Oosterom Kersen -- website van een Nederlandse kersenteler)",
+        category="teelt_praktijk",
+        url="https://www.oosterom-kersen.nl/nachtvorst-bestrijding/",
+        filename="oosteromkersen_nachtvorst_nl.html",
+        language="nl", status="to_fetch",
+        note="Van een ECHTE Nederlandse kersenteler zelf (geen leverancier/onderzoeksinstituut) -- "
+             "vorstberegening/ijslaag-mechanisme in de eigen praktijk, dicht bij de doelgroep-toon "
+             "die dit project nastreeft.",
+    ),
+    SourceSpec(
+        id="bomenenzo_bestuivingslijst_kersenboom",
+        title="Bestuivingslijst Kersenboom (Bomenenzo)",
+        category="teelt_praktijk",
+        url="https://www.bomenenzo.nl/bestuivingslijst-kersenboom",
+        filename="bomenenzo_bestuivingslijst_kersenboom_nl.html",
+        language="nl", status="to_fetch",
+        note="Kwekerij-bron -- praktische bestuivingscompatibiliteit (zelffertiel/kruisbestuiving, "
+             "bloeitijd-afstemming) tussen kersenrassen, onderwerp dat verder nergens voorkwam.",
+    ),
 ]
 
 

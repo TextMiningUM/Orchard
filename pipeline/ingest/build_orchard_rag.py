@@ -53,6 +53,26 @@ CHUNK_MAX_WORDS = 220
 CHUNK_MIN_WORDS = 25  # a trailing fragment shorter than this is merged into the previous chunk
 CHUNK_OVERLAP_WORDS = 30
 
+# Chunk-level exclusions (design doc Deel F #13/G.17): a handful of HTML source pages mix pure
+# site chrome (redirect/footer boilerplate, a fruit-category navigation menu, e-commerce
+# cart/sort-order controls) into the parsed body text in a way the generic
+# script/style/nav/header/footer-tag stripping in parse_orchard_documents.py's _parse_html()
+# doesn't catch (the chrome isn't wrapped in one of those semantic tags on these specific
+# sites). Found via pipeline/ingest/check_rag_chunk_quality.py's perplexity scoring (these
+# chunks scored among the highest/most "surprising" in the corpus) + manual confirmation they
+# carry zero actual disease/pest information -- same "honest, documented exclusion" discipline
+# as SKIP_FROM_RAG in parse_orchard_documents.py, just at chunk instead of document granularity.
+# Chunk ids are stable across reruns (md5 of doc_id|page_num|chunk-index) as long as that
+# document's own chunking doesn't change.
+EXCLUDED_CHUNK_IDS: set[str] = {
+    "fruitbomen_net_bladvlekkenziekte_c66f86ee",  # "Please click here if you are not redirected..."
+    "fruitbomen_net_bladvlekkenziekte_811feada",  # fruit-category nav menu ("Jostabessen Veenbessen...")
+    "fruitbomen_net_hagelschotziekte_e9d7e9bd",   # same redirect/footer boilerplate
+    "fruitbomen_net_hagelschotziekte_f03c88f7",   # same fruit-category nav menu
+    "puurvantveld_kersenvlieg_23cdac7e",          # webshop delivery/marketing header
+    "puurvantveld_kersenvlieg_e7c7d6e9",          # product-sort/cart controls
+}
+
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -110,7 +130,8 @@ def _pack_paragraphs(paragraphs: list[str]) -> list[str]:
 
 
 def chunk_document(doc: dict) -> list[dict]:
-    """Returns a list of chunk records (no embeddings yet) for one parsed document."""
+    """Returns a list of chunk records (no embeddings yet) for one parsed document --
+    excludes any chunk_id listed in EXCLUDED_CHUNK_IDS (confirmed pure HTML-chrome noise)."""
     records = []
     for page in doc["pages"]:
         paragraphs = _split_paragraphs(page["text"])
@@ -119,8 +140,11 @@ def chunk_document(doc: dict) -> list[dict]:
         for idx, chunk_text in enumerate(_pack_paragraphs(paragraphs)):
             if len(chunk_text.split()) < CHUNK_MIN_WORDS and len(records) > 0:
                 continue  # drop stray tiny fragments (e.g. a lone page header/footer)
+            chunk_id = stable_chunk_id(doc["doc_id"], page["page_num"], idx)
+            if chunk_id in EXCLUDED_CHUNK_IDS:
+                continue
             records.append({
-                "chunk_id": stable_chunk_id(doc["doc_id"], page["page_num"], idx),
+                "chunk_id": chunk_id,
                 "doc_id": doc["doc_id"], "title": doc["title"], "category": doc["category"],
                 "language": doc["language"], "url": doc.get("url"),
                 "source_file": doc["source_file"], "page_num": page["page_num"],
