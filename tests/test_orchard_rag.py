@@ -3,7 +3,8 @@ load in the automated suite; retrieval quality is smoke-tested manually once the
 built, see build_orchard_rag.py)."""
 from __future__ import annotations
 
-from pipeline.orchard_rag import _cap_per_document, _format_pages, format_context, format_sources
+from pipeline.orchard_rag import (DOSE_PLACEHOLDER, _cap_per_document, _format_pages, format_context, format_sources,
+                                  redact_doses)
 
 
 def _hit(doc_id: str, title: str, pages: list[int], text: str = "...", url: str | None = None,
@@ -21,6 +22,19 @@ def test_cap_per_document_limits_hits_per_source():
 
 def test_format_context_empty_hits():
     assert "geen relevante" in format_context([]).lower()
+
+
+def test_redact_doses_removes_per_area_doses_but_keeps_other_numbers():
+    text = "Gebruik 5 liter per hectare of 2,5 kg/ha; de boom is 3 meter hoog en 12 jaar oud, bij 25 g/hl."
+    out = redact_doses(text)
+    assert out.count(DOSE_PLACEHOLDER) == 3
+    assert "3 meter hoog en 12 jaar oud" in out and "5 liter" not in out and "kg/ha" not in out
+
+
+def test_format_context_never_shows_a_product_dose():
+    hit = _hit("a", "Webshop", [1], text="Vitalosol Gold: 5 liter per hectare tegen schimmels.")
+    out = format_context([hit])
+    assert "Vitalosol Gold" in out and "5 liter per hectare" not in out and DOSE_PLACEHOLDER in out
 
 
 def test_format_context_shows_the_section_so_a_card_is_identifiable():

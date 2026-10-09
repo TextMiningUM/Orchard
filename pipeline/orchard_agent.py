@@ -41,13 +41,23 @@ from pipeline.qwen_remote import generate_remote, stream_remote
 
 SYSTEM_PROMPT = (
     "Je bent een Nederlandstalige adviseur voor een kersenteler (zoete kers, Prunus avium). "
-    "Antwoord kort, praktisch en in het Nederlands. Baseer feitelijke uitspraken ALTIJD op de "
+    "Antwoord praktisch en in het Nederlands, beknopt maar VOLLEDIG: neem alle relevante maatregelen, de "
+    "reden (waarom) en de waarschuwingen / 'wat te vermijden'-punten uit de fragmenten mee, bij voorkeur als "
+    "korte opsomming. Baseer feitelijke uitspraken ALTIJD op de "
     "aangeleverde kennisbank-fragmenten of tool-resultaten -- verzin nooit een getal, dosering of "
     "middelnaam. Als iets niet in de aangeleverde informatie staat, zeg dat expliciet in plaats "
     "van te gokken. Noem nooit een concreet gewasbeschermingsmiddel of dosering als harde "
-    "aanbeveling -- verwijs daarvoor naar de ctgb_toelating-tool/Ctgb-databank. Sluit je antwoord "
+    "aanbeveling -- verwijs daarvoor naar de ctgb_toelating-tool/Ctgb-databank. Doe nooit een "
+    "uitspraak over of een middel is toegelaten, en verwijs bij elke vraag naar een middel of "
+    "dosering ALTIJD expliciet naar de Ctgb-databank en het etiket. Sluit je antwoord "
     "af met een regel 'Bronnen: ...' die de gebruikte fragmenten/tools noemt."
 )
+
+# The earlier, terser style: kept ONLY so the evaluation can compare the two (run_orchard_eval --prompt-style short).
+SYSTEM_PROMPT_SHORT = SYSTEM_PROMPT.replace(
+    "Antwoord praktisch en in het Nederlands, beknopt maar VOLLEDIG: neem alle relevante maatregelen, de "
+    "reden (waarom) en de waarschuwingen / 'wat te vermijden'-punten uit de fragmenten mee, bij voorkeur als "
+    "korte opsomming. Baseer", "Antwoord kort, praktisch en in het Nederlands. Baseer")
 
 TOOL_CALL_INSTR = (
     "Je mag voordat je antwoordt optioneel extra feiten ophalen door EEN tool per beurt aan te "
@@ -188,12 +198,24 @@ def _build_prompt_state(
     else:
         context_block = "(kennisbank-index nog niet gebouwd)"
 
+    logbook_block = ""
+    from pipeline.orchard_logbook_rag import (format_logbook, format_sources as logbook_sources,
+                                              is_personal_history_question, load_logbook_index, logbook_enabled)
+    if logbook_enabled() and is_personal_history_question(question):  # local-only opt-in, never on the public pod
+        lb = load_logbook_index(getattr(rag_index, "embedder", None), getattr(rag_index, "query_prefix", ""))
+        if lb is not None:
+            lb_hits, _trace = lb.search(question, k=6)
+            logbook_block = ("Relevante logboekfragmenten (eigen logboek van de teler; citeer alleen wat er staat):\n"
+                             f"{format_logbook(lb_hits)}\n\n")
+            sources.extend(logbook_sources(lb_hits))
+
     tool_catalog: dict[str, BoundTool] = build_tool_catalog(ctx, snapshot, rag_index)
     tool_list_text = "\n".join(f"- {t.name}: {t.description}" for t in tool_catalog.values())
     tool_instr = TOOL_CALL_INSTR.format(max_hops=max_tool_hops, tool_list=tool_list_text)
 
     user_msg = (
         f"Vraag: {question}\n\n"
+        f"{logbook_block}"
         f"Relevante kennisbank-fragmenten:\n{context_block}\n\n"
         f"{tool_instr}"
     )
@@ -205,7 +227,7 @@ def _build_prompt_state(
 
 def ask_orchard_advisor(
     question: str, ctx, snapshot: dict | None = None, rag_index: RagIndex | None = None,
-    max_tool_hops: int = 3, max_new_tokens: int = 700,
+    max_tool_hops: int = 3, max_new_tokens: int = 1500,
     history: list[dict] | None = None, max_history_turns: int = 4,
 ) -> AdvisorResponse:
     """Builds the prompt, runs the (optional) ReACT tool-call loop, and returns a grounded
@@ -347,7 +369,7 @@ def _stream_hop(messages: list[dict], max_new_tokens: int, enable_thinking: bool
 
 def ask_orchard_advisor_stream(
     question: str, ctx, snapshot: dict | None = None, rag_index: RagIndex | None = None,
-    max_tool_hops: int = 3, max_new_tokens: int = 700,
+    max_tool_hops: int = 3, max_new_tokens: int = 1500,
     history: list[dict] | None = None, max_history_turns: int = 4,
 ) -> StreamingAdvisorAnswer:
     """Streaming twin of `ask_orchard_advisor()` -- same prompt/ReACT/grounding logic, but the

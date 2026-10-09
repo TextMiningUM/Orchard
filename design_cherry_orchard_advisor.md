@@ -97,6 +97,7 @@ Bronnen voor dit ontwerp:
   - [G.24 Chunk-kwaliteitscontrole (QC) als poort voor RAG/KG/PG + knop "Controleer RAG Chunks"](#sec-g24)
   - [G.25 RAG herbouwd uit de gestructureerde JSON: bge-m3, geen reranker](#sec-g25)
   - [G.26 Procedure: hoe we RAG bouwen en QC doen, en de Code Library](#sec-g26)
+  - [G.27 KG, PG, OAC, logboek-RAG, trainingsdata, antwoord-eval en analyse (2026-10-10)](#sec-g27)
 
 ---
 
@@ -814,17 +815,17 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
    te wachten op een trainingsronde — zie de afwijking hierboven en [G.6](#sec-g6).
 6. **Track 2 erbij**: zodra OCR klaar is, logboek-RAG + conversational SFT-data toevoegen. — 🟡
    **DEELS**: de logboek-data wordt al live gebruikt door Patroonherkenning/Seizoenswaarschuwingen/
-   Gebruik van Middelen ([G.7](#sec-g7)-[G.9](#sec-g9)), maar nog niet als RAG-bron voor de chatbot
-   zelf, en nog geen conversational-SFT-dataset gebouwd.
+   Gebruik van Middelen ([G.7](#sec-g7)-[G.9](#sec-g9)), en sinds 2026-10-10 is het logboek ook een lokale RAG-bron voor de chatbot
+   ([G.27](#sec-g27)) plus open-book SFT-data (lokaal); een conversational-SFT-dataset op echte antwoorden bestaat nog niet.
 7. **DPO**: biologisch-vs-chemisch-voorkeur. — ⬜ **NOG NIET GESTART** als trainingsstap; wel is er nu
    een UI-mechanisme om voorkeursparen te VERZAMELEN (duim omhoog/omlaag op elk antwoord, zie
    [G.6](#sec-g6)) — de daadwerkelijke DPO-trainingsronde zelf volgt later, zodra er genoeg paren zijn.
 8. **Streamlit-dashboard v0**: alleen het Boomgaard Dashboard + Chat-pagina. — ✅ **GEDAAN, en ver
    voorbij v0**: 10 pagina's totaal, zie [B.9](#sec-b9)/[G.10](#sec-g10).
 9. **Evaluatie + ablaties**: pas zinvol zodra stap 1–7 staan. — 🟡 **GESTART** (2026-10-09): gouden
-   eval-set van 83 vragen + meetharnas + eerste baseline staan ([G.22](#sec-g22)); nog te doen:
-   volledige antwoord-evaluatie (`--answers`, vraagt de Qwen-server) als nulmeting, en de
-   herhaalmeting na de RAG-herbouw uit de gestructureerde JSON ([G.23](#sec-g23)/[G.24](#sec-g24)).
+   eval-set van 83 vragen + meetharnas + eerste baseline staan ([G.22](#sec-g22)); de antwoord-evaluatie (`--answers`) en de
+   herhaalmeting na de RAG-herbouw zijn gedaan ([G.25](#sec-g25), [G.27](#sec-g27)); nog te doen: herhaalde runs (ruis ±5 pt) en een
+   nieuwe held-out set.
    139 → 240 UNIT-tests bestaan ook (zie [G.11](#sec-g11)), maar dat is iets anders dan een
    agronomische kwaliteits-evaluatie.
 
@@ -896,8 +897,9 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
     **Literatuur**: bronnen bevatten vaak expliciete "doe dit niet, want..."-waarschuwingen (bv.
     "verwijder Monilia-vruchtmummies, nooit op de composthoop" — het worst-case-scenario staat er
     letterlijk bij). Beide zijn een los extractiescript-project, bedoeld als structureel invoer
-    voor een toekomstige SFT/DPO-trainingsronde (zie [Deel E](#deel-e) stap 5-7) — **nog niet
-    gestart**.
+    voor een toekomstige SFT/DPO-trainingsronde (zie [Deel E](#deel-e) stap 5-7). **DEELS GEDAAN (2026-10-10, [G.27](#sec-g27))**:
+    voor de 200 kaarten van de probleembank (die de OAC-structuur al hebben) is het een deterministische parse (200/200; 198 met ≥ 2 stappen);
+    voor prozachunks en logboek nog niet (logboek kent geen uitkomsten).
 15. **Procedurele grafen (meerstaps-workflows) nog niet afgeleid** — Auto Pilot heeft hier al
     een werkend, direct overdraagbaar patroon voor (`../Auto Pilot/pipeline/ingest/build_pg.py`,
     "Procedural Graph over de reasoning traces", Lu et al. 2026-stijl): een volledig
@@ -911,8 +913,9 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
     Orchard zou een ingreep (bv. "Monilia bestrijden": snoei zieke delen → gereedschap
     ontsmetten → mummies verwijderen+afvoeren → fungicide bij juiste BBCH-stadium → herhalen bij
     aanhoudend nat weer) zo'n procedure-reeks worden, gemined uit zowel de literatuur (nu
-    uitgebreid, zie [G.16](#sec-g16)) als het logboek. **Nog niet gestart** — directe
-    portering van `build_pg.py` naar dit domein is de aangewezen aanpak, niet opnieuw ontwerpen.
+    uitgebreid, zie [G.16](#sec-g16)) als het logboek.     **GEBOUWD voor de kaarten (2026-10-10, [G.27](#sec-g27))**: `orchard_pg.py` + `build_orchard_pg.py` (611 nodes, 435 edges, maar
+    slechts 1 edge met support > 1 -- elke kaart is een eigen procedure); nog niet in de agent geschakeld, wacht op prozatraces en
+    logboek-procedures voor meer-bron-support.
 16. **Kennisgraaf (Knowledge Graph) voor complexe, onderling verbonden elementen nog niet
     gebouwd** — ook hiervoor heeft Auto Pilot al een werkend patroon
     (`../Auto Pilot/pipeline/ingest/build_kg.py`, "Tutorial 13 § 8"): GEEN klassieke
@@ -928,7 +931,8 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
     verspreide relaties (weer → ziekte/plaag → product/dosering/timing → rasgevoeligheid →
     seizoensfase) in één doorzoekbare structuur kunnen samenbrengen i.p.v. losse Python-functies
     (`orchard_disease_weather_links.py`, `orchard_middelen.py`, `orchard_phenology_spec.py`).
-    **Nog niet gestart** — directe portering van `build_kg.py` is de aangewezen aanpak.
+    **GEBOUWD (2026-10-10, [G.27](#sec-g27))**: `orchard_kg.py` + `orchard_concepts.py` (70 concepten, hybride retrieval: hit@6 95% → 100%
+    op de gouden set, deels in-sample; neutraal op de onafhankelijke set).
 17. **Reward-functie voor toekomstige optimalisatie (bv. RL/DPO-achtige training) nog niet
     ontworpen**: er is nu een eenvoudig voorkeurssignaal (duim omhoog/omlaag, zie [G.14](#sec-g14))
     maar geen geëxpliciteerde reward-functie die meerdere doelen afweegt (bv. feitelijke
@@ -989,7 +993,8 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
     Let op: dit raakt de bestaande "nooit proprietaire bedrijfsdata naar een publieke/gedeelde
     context lekken"-afspraak (zie [G.13](#sec-g13)) niet — de logboek-RAG-index zou, net als de
     database zelf, lokaal-only blijven en nooit in de publieke pod-kennisbank terechtkomen.
-    **Nog niet gestart** — op de lijst voor een volgende versie.
+    **GEBOUWD, lokaal-only (2026-10-10, [G.27](#sec-g27))**: `orchard_logbook_rag.py` (tool `logboek_zoeken` + upfront-retrieval voor
+    "eigen historie"-vragen, alleen met `ORCHARD_LOGBOOK_RAG=1`, niet op de pod). Nog te doen: de 487 regels laten verifiëren (0 geverifieerd).
 
 ---
 
@@ -2000,3 +2005,110 @@ ondergebracht, mét tests en een volledige handleiding:
 Validatie van de port: dezelfde bronnen geven met `make_topic_splitter` exact Orchard's 184 USDA-chunks; 44 + 36 tests groen.
 Orchard zelf gebruikt voorlopig nog zijn eigen modules (`build_orchard_json.py`, `orchard_qc.py`); het is een bewuste vervolgstap om
 die op de library te laten leunen als die in een eigen repo/pakket staat.
+
+<a id="sec-g27"></a>
+## G.27 KG, PG, OAC, logboek-RAG, trainingsdata, antwoord-eval en analyse (2026-10-10)
+
+Deploy-status: de RAG-herbouw is gecommit/gepusht (6478791) en op de pod gezet (tar-sync, geen git-repo daar; bge-m3 gedownload,
+`pyspellchecker` geïnstalleerd, `orchard-streamlit` herstart; de knop "Controleer RAG Chunks" draait op de pod: 407 ok / 9 warn).
+Daarna kwamen KG, PG, OAC, logboek-RAG en trainingsdata erbij (hieronder), eveneens op de pod gezet — behalve alles wat logboekdata is.
+
+**1. Kennisgraaf + hybride retrieval** (`pipeline/orchard_concepts.py`, `orchard_kg.py`, `ingest/build_orchard_kg.py`; port van Auto Pilot's
+`build_kg.py`). Deterministisch lexicon van 70 concepten (ziekten, plagen, klimaat, bodem/bemesting, snoei, onderstammen, rassen, regelgeving,
+met NL/EN/Latijnse aliassen en spreektaal: "bronskleurig + webjes" → spint, "noteren bij bespuiting" → spuitregistratie). Gebouwd uit dezelfde
+416 QC-geslaagde chunks (65/70 concepten gebruikt, gem. 4,2 concepten/chunk, 9 chunks zonder concept). `retrieve_hybrid` = dense cosine +
+concept-boost (× IDF-gewicht, × 1,5 bij concept in de titel, + kleine co-occurrence-boost). `retrieve()` is nu standaard hybride zodra de index
+een KG heeft; een verouderde KG (andere chunk-ids) wordt genegeerd.
+
+| Retrieval, gouden set (79 vragen met bron) | hit@1 | hit@3 | hit@6 | hit@10 | MRR |
+|---|---|---|---|---|---|
+| dense (G.25) | 89% | 95% | 95% | 99% | 0,92 |
+| **hybride (KG), concept-boost 0,10** | **91%** | **97%** | **100%** | **100%** | **0,95** |
+| (boost 0,05: gelijk; boost 0,20: hit@1 87%) | | | | | |
+| Onafhankelijke synthetische set (200 observatie-regels → kaart), dense | 98% | 98% | 100% | 100% | 0,98 |
+| idem, hybride | 97% | 99% | 100% | 100% | 0,98 |
+
+Twee bevindingen. (a) **De per-document-cap (3 per bron) knelde juist het kaartendocument af**: de 200 kaarten zijn 200 losse antwoorden in
+één bestand; de goede kaart stond voor 2 van 79 vragen op rank 5–6 en viel eraf. Kaarten (`type == "probleem"`) zijn nu van de cap vrijgesteld
+(proza houdt cap 3). (b) **Eerlijk**: de gouden set is ook gebruikt om de cap en enkele aliassen te kiezen (kb024 is na het toevoegen van de
+spint-aliassen opgelost), dus de stap 95% → 100% is gedeeltelijk in-sample. Op de onafhankelijke observatie-set (lexicaal makkelijk) doet
+hybride niets extra's maar ook geen kwaad. De KG helpt dus vooral bij vocabulaire-gaten; voor een zuivere meting is een nieuwe, nooit gebruikte
+set nodig (zie stap 8).
+
+**2. OAC-extractie** (`ingest/extract_orchard_oac.py`, Deel F #14): de 200 "100 problemen"-kaarten hebben de OAC-structuur al (Observatie /
+Actie / Gevolg / Waarom / Slechtste reactie / Bronnen) — voor deze bron is "extractie" een deterministische parse, elk veld een letterlijk stuk
+van de chunk: 200/200 kaarten geparsed, 198 met ≥ 2 actiestappen. **Verificatiestatus van de kaarten**: 74 "bevestigd", 63 "deels
+bevestigd", 1 "bevestigd voor spint", **62 "nog geen bron gevonden"** — dat laatste mag niet ongezien in training (zie 5). De prozachunks
+(USDA-handbook, webpagina's) hebben geen OAC-structuur; daarvoor is een LLM-extractie met verificatie nodig (nog niet gedaan).
+
+**3. Procedurele graaf** (`orchard_pg.py`, `ingest/build_orchard_pg.py`; port van `build_pg.py`): stappen uit de Actie-regel (zinnen → `;` → komma's),
+canonicalisatie met bge-m3 (cos ≥ 0,893, nooit samenvoegen bij verschillende getallen of ontkenning), NEXT-edges met `condition` ← Observatie,
+`guidance` ← Waarom, `pitfalls` ← Slechtste reactie, support-telling. Resultaat: 198 traces, 634 stappen → 611 nodes (23 samengevoegd), 435 edges,
+**slechts 1 edge met support > 1**. Conclusie: elke kaart is een eigen procedure; de PG voegt boven op de kaarten zelf weinig toe zolang er geen
+andere bronnen (prozatraces) en geen logboek-procedures in zitten. Hij is gebouwd en getest (`next_steps`, `nearest_node`, `sample_path`) maar nog
+niet in de agent geschakeld — bewust, tot er meer-bron-support is.
+
+**4. Logboek als RAG-bron** (`orchard_logbook_rag.py`, Deel F #19): hybride (harde tijdsfilter op "11 mei 2013" / "mei 2013" / "2019", lexicaal
+op middelnaam en opmerking, dense als tiebreak), elk fragment gelabeld met datum en "[onzeker gelezen handschrift]" / "[nog niet geverifieerd]".
+**Lokaal-only**: de tool `logboek_zoeken` en de upfront-retrieval voor "eigen historie"-vragen bestaan alleen met `ORCHARD_LOGBOOK_RAG=1`
+(NIET gezet op de pod; het logboek lekt dus niet via de publieke chat). Meting op 598 synthetische vragen uit het logboek zelf: dag 100%,
+maand 100%, "tegen X" 90% (de rest is ambigu: meerdere regels noemen hetzelfde doel). Live gecontroleerd met Qwen (op drie typen vragen: één dag, één maand, een datum zonder regel): het model citeert de juiste regels uit het
+logboek en meldt bij een datum zonder regel "staat niet in het logboek, dichtstbijzijnde regel is ..." (de concrete antwoorden staan bewust
+niet in dit document: het zijn bedrijfsgegevens).
+Het model riep de tool zelf niet aan (kennisbank-upfront volstond in zijn ogen), vandaar de deterministische upfront-retrieval.
+
+**5. Trainingsdata** (`ingest/build_orchard_training_data.py`; alleen data, er is niets getraind). Uit de kaarten, deterministisch:
+`sft_cards` (vraag = observatie of probleemtitel, context = wat de live retriever teruggeeft, antwoord = Actie + Effect + Waarom + Vermijd +
+"Bronnen"), `dpo_cards` (chosen = dat antwoord, rejected = de "Slechtste reactie" van de kaart zelf als advies — een door de bron gedocumenteerd
+fout antwoord, geen synthetische negatieven), `reflection_cards` (draft = slechtste reactie → critique = het Waarom → revisie = antwoord).
+Beveiligingen: **72 kaarten zijn uitgesloten omdat de gouden set ze als bron verwacht** (nooit op de eval-set trainen; ook de synthetische
+observatie-set is dus ongeldig na training op die kaarten), 1 kaart noemt een dosering (uitgesloten), 3 niet terug te vinden door de retriever,
+62 "nog geen bron gevonden"-kaarten staan in een apart `*_unverified`-bestand. Resultaat: **145 verified SFT-/DPO-/Reflectie-voorbeelden**
+(118 train / 27 val, split per kaart), 106 unverified. **Logboek (LOKAAL-ONLY, `LOCALONLY_*`)**: 467 open-book SFT-voorbeelden (retrieved
+logboekregels in de prompt, antwoord citeert alleen die; incl. 40 "staat niet in je logboek"-voorbeelden); het logboek kent alleen acties en weer,
+nooit uitkomsten, dus daar is geen DPO/Reflectie uit te halen. Van de 487 logboekregels zijn er **0 menselijk geverifieerd** en 163 als onzeker
+gemarkeerd; 304 bruikbare regels → alles is `silver`. **Feedback**: de pod heeft 4 duim-records (3 omhoog, 1 omlaag, 0 paren per vraag) — dat is
+nog geen DPO-materiaal (Deel F #11).
+
+**6. Antwoord-evaluatie** (83 vragen, Qwen3-8B via de pod; sampling-ruis tussen runs ≈ ±5 pt, dus verschillen < 5 pt zijn niet significant):
+
+| Configuratie | Grounding | Feitendekking gem. / volledig | Guardrail | Latency |
+|---|---|---|---|---|
+| geen kennisbank | 45% | 10% / 3% | 100% | 4,7 s |
+| kennisbank + KG, 700 tokens, korte prompt | 98% | 82% / 65% | 75% (1 dosering-lek) | 4,4 s |
+| idem, 700 tokens, "volledige" prompt | 83% | 87% / 75% | 100% | 5,5 s |
+| korte prompt, 1500 tokens | 100% | 83% / 68% | 100% | 4,3 s |
+| volledige prompt, 1500 tokens | 98% | 89% / 78% | 75% (geen Ctgb-verwijzing) | 6,2 s |
+| **eindconfiguratie: volledige prompt + Ctgb-regel, 1500 tokens** | **98%** | **84% / 70%** | **100%** | **5,3 s** |
+
+**7. Analyse en conclusies**
+- **De kennisbank doet het werk**: zonder kennisbank 10% feitendekking en 45% grounding; met kennisbank 82–89% en 98–100%.
+- **Het knelpunt zit in generatie, niet in retrieval**: van de 29 gemiste feiten (28 vragen) stond **elk** feit in de opgehaalde context.
+  De antwoorden zijn te kort/selectief ("Antwoord kort"). Een "beknopt maar volledig"-prompt geeft +1…6 pt (binnen de ruis); de grote
+  stap is niet met een prompt te halen → dit is waar SFT op de OAC-kaarten (antwoord uit ALLE relevante velden van het fragment) kan helpen.
+- **Afkappen was een echt productie-defect**: met 700 nieuwe tokens (incl. thinking) werden antwoorden midden in een woord afgekapt vóór de
+  "Bronnen:"-regel (10 van de 14 rode grounding-gevallen). Standaard `max_new_tokens` is nu 1500 (app én eval); effect op latency klein.
+- **Compliance-lek gevonden en gefixt**: een in de bron staande productdosering ("5 liter per hectare, Vitalosol Gold") werd door het model
+  herhaald voordat het naar Ctgb verwees. Fix volgens het deterministische-kern-principe: `redact_doses()` haalt per-oppervlak-doseringen uit
+  de context (`format_context`); plus een promptregel (nooit een toelatingsstatus beweren, altijd naar Ctgb/etiket verwijzen). Guardrail 4/4,
+  maar het zijn maar 4 vragen en de metriek is lexicaal: hij ving niet dat het model "Decis is niet toegelaten" beweerde (zonder basis).
+- **Hybride retrieval**: +2…5 pt op de gouden set (deels in-sample), neutraal op de onafhankelijke set; goedkoop (0,1 s) en deterministisch.
+- **PG** levert nog weinig (zie 3); **logboek-RAG** werkt en is veilig lokaal; **trainingsdata** is dun (145 verified kaart-voorbeelden) en
+  het logboek is niet geverifieerd.
+
+**8. Volgende stappen (in volgorde van verwachte waarde)**
+1. **Meetbetrouwbaarheid**: elke antwoord-eval 3× draaien (of temperatuur vast) en rapporteren als gemiddelde ± spreiding; een nieuwe, nooit
+   gebruikte held-out set (bv. 40 logboek- en 40 praktijkvragen) vóór er getraind wordt. Guardrail-set uitbreiden (4 → 20+) en een toelatingsstatus-
+   claim als overtreding meetellen.
+2. **Reward-functie ontwerpen (Deel F #17) — nu concreet te maken**: de onderdelen bestaan al deterministisch: feitendekking (sleutelwoorden uit
+   de kaart-velden), grounding (citeert een aangeleverd fragment), compliance (geen dosering, wel Ctgb-verwijzing), afkap-straf, lengte-straf.
+3. **SFT-ronde 1 (QLoRA, op de pod)** op `sft_cards_train` (118) met `sft_cards_val` als stop-criterium, evalueren op de gouden set (de 72 kaarten
+   zijn uitgesloten, dus geen contaminatie). Verwachting eerlijk laag houden: 118 voorbeelden zijn weinig; doel is antwoord-volledigheid, geen kennis.
+   Eerst de 62 "nog geen bron gevonden"-kaarten laten verifiëren (of per kaart zoeken) om de set te vergroten.
+4. **Meer verified data zonder handwerk**: rejection sampling met de reward uit 2 (N antwoorden per niet-gold kaart, beste = chosen, slechtste =
+   rejected) levert veel DPO-paren; plus LLM-extractie van OAC/procedures uit de prozachunks met letterlijke-span-verificatie (Deel F #14, vult ook de PG).
+5. **Logboek eerst verifiëren** (Verifieren-pagina: 0/487 gedaan, 163 onzeker) vóór logboek-SFT of -analyse; daarna open-book SFT en patronen
+   (bv. Observatie→Actie uit "Tegen X"-regels met weer als context). Het logboek heeft geen uitkomsten: voor Reflectie/DPO uit eigen data is een
+   outcome-signaal nodig (oogst/schade per seizoen, Deel F #17).
+6. **Duim-feedback** is te dun (4 records); verzamelen blijft aan, maar paren komen vooral uit stap 4.
+7. Pod: de publieke app draait nu hybride + nieuwe prompt + 1500 tokens + dosering-redactie; de logboek-tool staat daar uit.

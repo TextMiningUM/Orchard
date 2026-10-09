@@ -141,6 +141,26 @@ def validate_gold(items: list[dict], chunks: list[dict]) -> list[str]:
     return problems
 
 
+def observation_card_items(chunks: list[dict]) -> list[dict]:
+    """Synthetic, tuning-independent retrieval items: for every numbered problem card, the grower's OBSERVATION line
+    ("Plassen na regen, gele bladeren ...") is the question and that card is the expected source. Built straight from
+    the knowledge base, so it can be neither tuned on nor cherry-picked -- an easy/lexical check (the question
+    shares vocabulary with the card), valuable as a regression test and as a second opinion next to the hand-written
+    gold set that the retrieval configuration was chosen on."""
+    items = []
+    for c in chunks:
+        if c.get("type") != "probleem":
+            continue
+        m = re.search(r"^- Observatie:\s*(.+)$", c["text"], re.M)
+        number = re.match(r"(\d+)\.\s", c.get("title", "") or (c.get("section_titles") or [""])[0])
+        number = number or re.match(r"(\d+)\.\s", (c.get("section_titles") or [""])[0])
+        if not (m and number):
+            continue
+        items.append({"id": f"obs{number.group(1)}", "category": "kennisbank", "question": m.group(1).strip(),
+                      "sources": [f"{c['doc_id']}#{number.group(1)}"]})
+    return items
+
+
 def evaluate_retrieval(items: list[dict], retrieve_fn, ks: tuple[int, ...] = DEFAULT_KS) -> dict:
     """`retrieve_fn(question) -> list[hit]` (best first, at least ``max(ks)`` deep). Only items
     with expected sources take part. Returns per-item results plus overall/per-category
@@ -247,7 +267,7 @@ def _secs(stats: dict, key: str) -> str:
 def format_report(retrieval: dict | None, answers: dict | None, label: str = "") -> str:
     """Markdown report of one evaluation run (what gets pasted into the design doc)."""
     lines = [f"# Orchard-evaluatie {label}".rstrip(), ""]
-    if retrieval:
+    if retrieval and retrieval["summary"]["overall"].get("n"):
         s = retrieval["summary"]
         ks = [k for k in s["overall"] if k.startswith("hit@")]
         lines += ["## Retrieval", "", "| Set | n | " + " | ".join(ks) + " | MRR |",

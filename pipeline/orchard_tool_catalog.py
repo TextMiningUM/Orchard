@@ -116,6 +116,19 @@ def _kennisbank_zoeken(arg: str | None, rag_index: RagIndex | None) -> ToolResul
     return ToolResult(facts=format_context(hits), sources=format_sources(hits))
 
 
+def _logboek_zoeken(arg: str | None, logbook_index) -> ToolResult:
+    query = (arg or "").strip()
+    if not query:
+        return ToolResult(facts="Geen zoekterm meegegeven aan logboek_zoeken.")
+    from pipeline.orchard_logbook_rag import format_logbook, format_sources as logbook_sources
+    hits, trace = logbook_index.search(query, k=6)
+    note = ""
+    if trace["hints"]["years"] or trace["hints"]["months"] or trace["hints"]["dates"]:
+        if not trace["time_filtered"]:
+            note = "LET OP: voor die periode staat niets in het logboek; dit zijn de dichtstbijzijnde regels.\n"
+    return ToolResult(facts=note + format_logbook(hits), sources=logbook_sources(hits))
+
+
 def build_tool_catalog(ctx, snapshot: dict | None, rag_index: RagIndex | None) -> dict[str, BoundTool]:
     """Returns the full tool catalogue, each tool already bound to the current `ctx`
     (location/variety/stage), `snapshot` (this session's compute_season_snapshot() result --
@@ -137,6 +150,19 @@ def build_tool_catalog(ctx, snapshot: dict | None, rag_index: RagIndex | None) -
             fn=_ctgb_toelating,
         ),
     }
+    # The teler's own logbook: LOCAL-ONLY, opt-in via ORCHARD_LOGBOOK_RAG=1 (never set on the public pod).
+    from pipeline.orchard_logbook_rag import load_logbook_index, logbook_enabled
+    if logbook_enabled():
+        logbook_index = load_logbook_index(getattr(rag_index, "embedder", None), getattr(rag_index, "query_prefix", ""))
+        if logbook_index is not None:
+            catalog["logboek_zoeken"] = BoundTool(
+                name="logboek_zoeken",
+                description="Doorzoek het EIGEN logboek van de teler (wat is wanneer gespoten of gestrooid, met weer "
+                             "erbij; 2013-heden). Gebruik dit voor elke vraag over wat de teler zelf eerder deed. "
+                             "Citeer alleen wat er staat; de transcripties zijn nog niet allemaal geverifieerd.",
+                arg_hint="een korte zoekvraag met jaar/maand/datum en/of middel, bijv. 'Syllit 2019' of 'mei 2014'",
+                fn=lambda arg: _logboek_zoeken(arg, logbook_index),
+            )
     if snapshot is not None:
         catalog.update({
             "weer_vooruitzicht": BoundTool(

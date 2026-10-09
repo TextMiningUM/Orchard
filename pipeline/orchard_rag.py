@@ -17,6 +17,7 @@ once Track 1 has a gold Q&A eval set (design doc Sec C.3-ish / roadmap Fase 4).
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -37,13 +38,14 @@ class RagIndex:
 
     def __init__(self, embedder: SentenceTransformer, embeddings: np.ndarray,
                  chunk_ids: list[str], chunks: list[dict], reranker: CrossEncoder | None,
-                 query_prefix: str = ""):
+                 query_prefix: str = "", kg: dict | None = None):
         self.embedder = embedder
         self.embeddings = embeddings
         self.chunk_ids = chunk_ids
         self.chunk_by_id = {c["chunk_id"]: c for c in chunks}
         self.reranker = reranker
         self.query_prefix = query_prefix
+        self.kg = kg  # knowledge graph (pipeline/orchard_kg.py); None -> dense-only retrieval
 
     @property
     def n_chunks(self) -> int:
@@ -79,7 +81,12 @@ def load_index(paths: AgentPaths | None = None, use_reranker: bool = False) -> R
     embedder.max_seq_length = int(meta.get("max_seq_length") or EMBEDDER_MAX_SEQ_LENGTH)
     reranker = CrossEncoder(RERANKER_MODEL, device="cpu") if use_reranker else None
 
-    _INDEX = RagIndex(embedder, embeddings, chunk_ids, chunks, reranker, meta.get("query_prefix", ""))
+    from pipeline.orchard_kg import load_kg
+    kg = load_kg(cache_dir)
+    if kg is not None and set(kg["chunk_meta"]) != set(chunk_ids):
+        kg = None  # stale graph (index rebuilt without rebuilding the KG): never mix them
+
+    _INDEX = RagIndex(embedder, embeddings, chunk_ids, chunks, reranker, meta.get("query_prefix", ""), kg)
     return _INDEX
 
 
@@ -91,31 +98,35 @@ def _dense_search(index: RagIndex, query: str, pool_n: int) -> list[tuple[str, f
 
 
 def _cap_per_document(hits: list[dict], max_per_document: int) -> list[dict]:
+    """Keeps at most ``max_per_document`` chunks of one source so a long handbook cannot crowd out the rest. Numbered
+    problem cards (``type == "probleem"``) are exempt: the 200 cards of the problem bank are 200 separate answers that
+    merely share one file, and capping them hid the right card for 2 of 79 gold questions (rank 5-6, cut off)."""
     seen: dict[str, int] = {}
     out = []
     for h in hits:
         doc_id = h["doc_id"]
-        if seen.get(doc_id, 0) >= max_per_document:
-            continue
-        seen[doc_id] = seen.get(doc_id, 0) + 1
+        if h.get("type") != "probleem":
+            if seen.get(doc_id, 0) >= max_per_document:
+                continue
+            seen[doc_id] = seen.get(doc_id, 0) + 1
         out.append(h)
     return out
 
 
 def retrieve(query: str, index: RagIndex, k: int = 5, pool_n: int = 60,
-             rerank: bool = True, max_per_document: int = RAG_MAX_PER_DOCUMENT) -> list[dict]:
+             rerank: bool = True, max_per_document: int = RAG_MAX_PER_DOCUMENT,
+             hybrid: bool = True) -> list[dict]:
     """Returns up to `k` chunk records (each the chunk dict + a `score` field), best first.
+    When the index carries a knowledge graph (``index.kg``) and ``hybrid`` is True, ranking is dense cosine + a
+    concept-graph boost (``pipeline/orchard_kg.retrieve_hybrid``; hit@6 95% -> 100% on the gold set, design doc
+    G.27) and no reranker is used; otherwise dense search, optionally followed by a cross-encoder rerank.
     Dense search always runs; a cross-encoder rerank pass narrows the `pool_n` dense hits down to
     `k` whenever `rerank` is True AND a reranker was loaded (silently falls back to dense-only
-    ranking otherwise, same graceful-degradation posture as the rest of this module).
-
-    `pool_n=60` (raised from 25 on 2026-10-09, Fase 4 corpus-uitbreiding): with ~400 chunks across
-    20 documents, a genuinely relevant chunk for a narrower topic (e.g. a single HTML page about
-    vogelschade) can rank outside the top 25 purely on cosine similarity even though it is clearly
-    the best match once reranked -- confirmed empirically (rank 28-43) while diagnosing why some
-    newly-added sources weren't surfacing. A wider pool costs a few extra reranker calls (still
-    well under a second on CPU) but meaningfully improves recall for narrow/single-source topics."""
-    dense_hits = _dense_search(index, query, pool_n)
+    ranking otherwise, same graceful-degradation posture as the rest of this module)."""
+    if hybrid and index.kg is not None and not (rerank and index.reranker is not None):
+        from pipeline.orchard_kg import retrieve_hybrid
+        return retrieve_hybrid(query, index, index.kg, k=k, max_per_document=max_per_document)
+    dense_hits = _dense_search(index, query, pool_n)  # pool_n=60: a narrow single-source topic can rank 28-43 on cosine alone
     if rerank and index.reranker is not None:
         pairs = [(query, index.chunk_by_id[cid].get("text_with_context") or index.chunk_by_id[cid]["text"])
                  for cid, _ in dense_hits]
@@ -143,6 +154,19 @@ def _format_pages(h: dict) -> str:
     return "p." + ", ".join(str(p) for p in pages)
 
 
+_DOSE_PER_AREA_RE = re.compile(
+    r"\b\d+(?:[.,]\d+)?\s*(?:l|liter|ltr|kg|ml|g|gr|gram)\s*(?:/|per)\s*(?:ha|hectare|hl|100\s*l)\b", re.I)
+DOSE_PLACEHOLDER = "[dosering weggelaten: zie het Ctgb-etiket]"
+
+
+def redact_doses(text: str) -> str:
+    """Product doses per area ("5 liter per hectare", "2 kg/ha") are removed from what the model sees. The advisor must
+    never present a dose as advice (system prompt + guardrail questions), and a dose that merely stands in a retrieved
+    source (a webshop page, a product sheet) used to leak through anyway: the gold run answered gr02 with "5 liter per
+    hectare ... (Vitalosol Gold)" before referring to Ctgb. Deterministic, so it cannot be talked around."""
+    return _DOSE_PER_AREA_RE.sub(DOSE_PLACEHOLDER, text)
+
+
 def format_context(hits: list[dict]) -> str:
     """Renders retrieved chunks as labelled, citable excerpts for a prompt -- mirrors Auto
     Pilot's `_format_context()` helpers in captain_agent_live.py/chief_engineer_agent_live.py."""
@@ -154,7 +178,7 @@ def format_context(hits: list[dict]) -> str:
         path = h.get("heading_path") or []
         section = f", sectie: {' > '.join(path[-2:])}" if len(path) > 1 else ""
         parts.append(
-            f"[Fragment {j} -- {h['title']}{lang_note}{section}, {_format_pages(h)}]\n{h['text']}"
+            f"[Fragment {j} -- {h['title']}{lang_note}{section}, {_format_pages(h)}]\n{redact_doses(h['text'])}"
         )
     return "\n\n".join(parts)
 

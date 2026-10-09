@@ -29,10 +29,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--validate-only", action="store_true", help="Alleen de gouden set valideren")
     parser.add_argument("--answers", action="store_true", help="Ook volledige adviseur-antwoorden meten (Qwen-server nodig)")
     parser.add_argument("--rerank", action="store_true", help="Ablatie: dense retrieval + cross-encoder-rerank (standaard UIT)")
+    parser.add_argument("--hybrid", action="store_true", help="Hybride retrieval: dense + kennisgraaf (concept-boost)")
+    parser.add_argument("--concept-boost", type=float, default=0.10, help="Gewicht concept-boost (met --hybrid)")
+    parser.add_argument("--cooccur-boost", type=float, default=0.03, help="Gewicht co-occurrence-boost (met --hybrid)")
+    parser.add_argument("--obs-cards", action="store_true",
+                        help="Onafhankelijke synthetische set: observatie-regel van elke probleemkaart -> die kaart")
+    parser.add_argument("--max-per-doc", type=int, default=3, help="Max. fragmenten per bron in de top-k")
     parser.add_argument("--no-rag", action="store_true", help="Ablatie (met --answers): adviseur zonder kennisbank")
     parser.add_argument("--category", choices=["kennisbank", "praktijk", "guardrail"], help="Alleen deze categorie")
     parser.add_argument("--limit", type=int, help="Maximaal N vragen (snelle rooktest)")
-    parser.add_argument("--max-new-tokens", type=int, default=700)
+    parser.add_argument("--max-new-tokens", type=int, default=1500)
+    parser.add_argument("--prompt-style", choices=["full", "short"], default="full",
+                        help="Systeemprompt: 'full' (volledig maar beknopt, standaard) of 'short' (oude, kortere stijl)")
     parser.add_argument("--label", default="", help="Korte naam voor de resultaatbestanden")
     args = parser.parse_args(argv)
 
@@ -61,16 +69,33 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.category:
         items = [i for i in items if i["category"] == args.category]
+    if args.obs_cards:
+        from pipeline.orchard_eval import observation_card_items
+        items = observation_card_items(list(index.chunk_by_id.values()))
+        print(f"Synthetische set: {len(items)} observatie-vragen uit de probleemkaarten.")
     if args.limit:
         items = items[:args.limit]
 
     from pipeline.orchard_rag import retrieve
     rerank = args.rerank
-    retrieval = evaluate_retrieval(
-        items, lambda q: retrieve(q, index, k=max(DEFAULT_KS), rerank=rerank), DEFAULT_KS)
+    if args.hybrid:
+        from pipeline.orchard_kg import load_kg, retrieve_hybrid
+        kg = load_kg(paths.cache_dir)
+        if kg is None:
+            print("KG ontbreekt -- draai eerst pipeline/ingest/build_orchard_kg.py", file=sys.stderr)
+            return 2
+        retrieve_fn = lambda q: retrieve_hybrid(q, index, kg, k=max(DEFAULT_KS), concept_boost=args.concept_boost,
+                                                cooccur_boost=args.cooccur_boost, max_per_document=args.max_per_doc)
+    else:
+        retrieve_fn = lambda q: retrieve(q, index, k=max(DEFAULT_KS), rerank=rerank, max_per_document=args.max_per_doc,
+                                         hybrid=False)  # explicit dense baseline (retrieve() is hybrid by default)
+    retrieval = evaluate_retrieval(items, retrieve_fn, DEFAULT_KS)
 
     answers = None
     if args.answers:
+        from pipeline import orchard_agent
+        if args.prompt_style == "short":
+            orchard_agent.SYSTEM_PROMPT = orchard_agent.SYSTEM_PROMPT_SHORT
         from pipeline.orchard_agent import ask_orchard_advisor
         from pipeline.qwen_remote import is_remote_server_up, reconnect_tunnel
         if not is_remote_server_up():
@@ -86,7 +111,9 @@ def main(argv: list[str] | None = None) -> int:
                                                  max_new_tokens=args.max_new_tokens))
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    label = "_".join(filter(None, [args.label, "rerank" if args.rerank else "", "norag" if args.no_rag else ""]))
+    label = "_".join(filter(None, [args.label, "hybrid" if args.hybrid else "", "rerank" if args.rerank else "",
+                                   "norag" if args.no_rag else "", f"tok{args.max_new_tokens}",
+                                   f"prompt-{args.prompt_style}" if args.answers else ""]))
     report = format_report(retrieval, answers, label=f"({stamp} {label})".replace(" )", ")"))
     runs_dir = paths.eval_dir / "_runs"
     runs_dir.mkdir(parents=True, exist_ok=True)
