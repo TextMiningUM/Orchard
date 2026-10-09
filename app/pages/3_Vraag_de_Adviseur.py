@@ -52,6 +52,17 @@ from datetime import datetime, timezone  # noqa: E402
 st.set_page_config(page_title="Vraag de Adviseur", layout="wide")
 st.title("Vraag de Adviseur")
 
+with st.form("ask_form_top", clear_on_submit=True):
+    prompt_top = st.text_input(
+        "Stel een vraag",
+        placeholder=(
+            'Typ je vraag helemaal onderaan dit scherm, bijvoorbeeld "is er vorstrisico deze '
+            'week?" of "wat zegt de kennisbank over Monilia?".'
+        ),
+        label_visibility="collapsed",
+    )
+    submitted_top = st.form_submit_button("Vraag stellen")
+
 ctx = render_sidebar(st)
 
 
@@ -253,7 +264,7 @@ def _render_assistant_message(answer: str, meta: dict, key_prefix: str) -> None:
 
     feedback = meta.get("feedback")
     if feedback:
-        st.caption(f"Feedback opgeslagen: {'nuttig' if feedback == 'chosen' else 'niet nuttig'} (dank je!)")
+        st.caption(f"Feedback opgeslagen: {'👍' if feedback == 'chosen' else '👎'} (dank je!)")
         return
 
     col1, col2, _rest = st.columns([1, 1, 6])
@@ -268,8 +279,8 @@ def _render_assistant_message(answer: str, meta: dict, key_prefix: str) -> None:
         meta["feedback"] = preference
         _save_current_chat()
 
-    col1.button("Nuttig", key=f"{key_prefix}_up", on_click=_give_feedback, args=("chosen",))
-    col2.button("Niet nuttig", key=f"{key_prefix}_down", on_click=_give_feedback, args=("rejected",))
+    col1.button("👍", key=f"{key_prefix}_up", help="Nuttig", on_click=_give_feedback, args=("chosen",))
+    col2.button("👎", key=f"{key_prefix}_down", help="Niet nuttig", on_click=_give_feedback, args=("rejected",))
 
 
 for i, entry in enumerate(st.session_state["chat_history"]):
@@ -280,27 +291,18 @@ for i, entry in enumerate(st.session_state["chat_history"]):
         else:
             st.markdown(msg)
 
-st.warning(
-    "**Fase 1**: vorst/regen/koude-uren/kersenvlieg/vruchtbarsten/middel-vragen gaan via "
-    "betrouwbare, gegronde tools. Alle overige vragen gaan nu naar Qwen3-8B **met** de Track "
-    "1-kennisbank (RAG + reranking) en toegang tot dezelfde tools, in een stap-voor-stap "
-    "(ReACT) redeneerlus met zichtbare tussenstappen. Dit is nog het ongetrainde basismodel "
-    "(geen SFT/DPO) -- het kan dus nog steeds fouten maken buiten wat de kennisbank/tools "
-    "dekken. Zie ontwerp Deel E voor de trainingsroadmap."
-)
-
-if prompt := st.chat_input("Stel een vraag, bijv. 'is er vorstrisico deze week?'"):
-    st.session_state["chat_history"].append(("user", prompt, {}))
+if submitted_top and prompt_top:
+    st.session_state["chat_history"].append(("user", prompt_top, {}))
     with st.chat_message("user"):
-        st.markdown(prompt)
+        st.markdown(prompt_top)
     with st.chat_message("assistant"):
         with st.spinner(
             "De adviseur denkt na... (bij een vraag die niet direct door een tool wordt "
             "beantwoord, raadpleegt het AI-model eerst de kennisbank en kan het 30-60 "
             "seconden duren)"
         ):
-            result = _route_question(prompt)
-        result["question"] = prompt
+            result = _route_question(prompt_top)
+        result["question"] = prompt_top
         result["feedback"] = None
         st.session_state["chat_history"].append(("assistant", result["answer"], result))
         _save_current_chat()

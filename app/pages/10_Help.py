@@ -58,7 +58,7 @@ rekentools mag raadplegen voor een onderbouwd antwoord.
   te pas kwam voor dit specifieke antwoord — wees dan extra kritisch, want het model kan dan iets
   verzinnen (een "hallucinatie"). **Let op: groen is geen garantie dat het antwoord klopt, alleen dat
   het ergens op gebaseerd is** — controleer belangrijke feiten (middelen, doseringen) altijd zelf.
-- **"Nuttig"/"Niet nuttig"-knoppen** — geef aan of een antwoord bruikbaar was. Dit wordt opgeslagen en
+- **Duim omhoog/omlaag-knoppen** — geef aan of een antwoord bruikbaar was. Dit wordt opgeslagen en
   gebruikt om het model in een latere ronde te verbeteren. Na een klik verschijnt een bevestiging; je
   kunt daarna niet meer wisselen van keuze voor dat antwoord.
 
@@ -196,7 +196,7 @@ dus voor middel/dosering-vragen verwijst het je altijd door naar ctgb.nl.
 """
     )
 
-with st.expander("Wat gebeurt er met mijn 'Nuttig'/'Niet nuttig'-feedback?"):
+with st.expander("Wat gebeurt er met mijn duim-omhoog/omlaag-feedback?"):
     st.markdown(
         """
 Die wordt lokaal opgeslagen en gebruikt als trainingsmateriaal voor een latere verbeterronde van het
