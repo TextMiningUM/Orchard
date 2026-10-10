@@ -126,6 +126,11 @@ class AgentPaths:
         """Committed hand-authored gold Q&A file (in eval_dir)."""
         return self.eval_dir / f"{self.domain.lower()}_gold_qa.json"
 
+    @property
+    def heldout_file(self) -> Path:
+        """Committed held-out v2 set (never trained on, never used to choose a configuration)."""
+        return self.eval_dir / f"{self.domain.lower()}_heldout_qa.json"
+
     def eval_file(self, name: str) -> Path:
         """Any other held-out file in eval_dir, e.g. paths.eval_file('orchard_scenarios.json')."""
         return self.eval_dir / name

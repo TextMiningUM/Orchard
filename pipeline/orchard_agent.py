@@ -32,12 +32,36 @@ it's clear it's a plain-text answer and not a tool call (see `_stream_hop()`).
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 
 from pipeline.orchard_rag import RagIndex
 from pipeline.orchard_tool_catalog import BoundTool, build_tool_catalog
-from pipeline.qwen_remote import generate_remote, stream_remote
+from pipeline.qwen_remote import generate_remote as _generate_remote
+from pipeline.qwen_remote import stream_remote as _stream_remote
+
+# Which weights the inference server uses for ALL advisor calls: "W0_base" (AWQ base model) or the directory name of a
+# LoRA adapter under the domain models dir on the pod (see cloud/qwen_inference_server.py). Evaluation switches it
+# (run_orchard_eval --weights) so a fine-tune is compared on exactly the same prompts as the base model.
+ADVISOR_WEIGHTS = os.environ.get("ORCHARD_ADVISOR_WEIGHTS", "W0_base")  # e.g. ORCHARD_ADVISOR_WEIGHTS=sft_v2 (rollback: unset it)
+
+# Sampling overrides for ALL advisor calls (e.g. {"repetition_penalty": 1.05}); see run_orchard_eval --rep-penalty.
+ADVISOR_SAMPLING: dict = {}
+
+
+def generate_remote(*args, **kwargs):
+    kwargs.setdefault("weights", ADVISOR_WEIGHTS)
+    for key, value in ADVISOR_SAMPLING.items():
+        kwargs.setdefault(key, value)
+    return _generate_remote(*args, **kwargs)
+
+
+def stream_remote(*args, **kwargs):
+    kwargs.setdefault("weights", ADVISOR_WEIGHTS)
+    for key, value in ADVISOR_SAMPLING.items():
+        kwargs.setdefault(key, value)
+    return _stream_remote(*args, **kwargs)
 
 SYSTEM_PROMPT = (
     "Je bent een Nederlandstalige adviseur voor een kersenteler (zoete kers, Prunus avium). "
@@ -121,6 +145,44 @@ def _dedup(items: list[str]) -> list[str]:
             seen.add(it)
             out.append(it)
     return out
+
+
+LOOP_RETRY_PENALTY = 1.1
+_LOOP_MIN_WORDS = 4
+_LOOP_REPEATS = 3
+
+
+def _sentences(text: str) -> list[str]:
+    return [s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s]
+
+
+def has_repetition_loop(text: str) -> bool:
+    """True when one (non-trivial) sentence occurs >= 3 times: the degenerate loop SFT adapters sometimes fall into
+    (measured: 0/342 answers for the base model, 5/342 for sft_v2). Short sentences ("Ja.") never count."""
+    counts: dict[str, int] = {}
+    for s in _sentences(text):
+        if len(s.split()) >= _LOOP_MIN_WORDS:
+            counts[s] = counts.get(s, 0) + 1
+    return bool(counts) and max(counts.values()) >= _LOOP_REPEATS
+
+
+def collapse_repetition(text: str) -> str:
+    """Removes every repeat of an already-seen long sentence; changes nothing when there is no loop. Only ever DROPS text,
+    so it cannot add a claim; a final unfinished sentence left over from a loop that hit the token limit is dropped too."""
+    if not has_repetition_loop(text):
+        return text
+    seen: set[str] = set()
+    kept = []
+    for s in _sentences(text):
+        key = s if len(s.split()) >= _LOOP_MIN_WORDS else None
+        if key is not None and key in seen:
+            continue
+        if key is not None:
+            seen.add(key)
+        kept.append(s)
+    while kept and not kept[-1].rstrip().endswith((".", "!", "?", ")", "*", ":")):
+        kept.pop()
+    return " ".join(kept)
 
 
 # A long question, or one with multiple clauses/conditions to weigh, benefits from Qwen3's
@@ -256,7 +318,7 @@ def ask_orchard_advisor(
     budget = max_new_tokens
 
     for _hop in range(max_tool_hops + 1):
-        raw = generate_remote(messages=messages, max_new_tokens=budget, enable_thinking=enable_thinking)
+        raw = generate_remote(messages=messages, max_new_tokens=budget, enable_thinking=enable_thinking, weights=ADVISOR_WEIGHTS)
         reasoning, remainder = _strip_think(raw)
         if reasoning:
             reasoning_parts.append(reasoning)
@@ -272,6 +334,13 @@ def ask_orchard_advisor(
 
         tool_call = _extract_tool_call(remainder) if _hop < max_tool_hops else None
         if tool_call is None:
+            if has_repetition_loop(remainder):
+                # SFT adapters occasionally loop on one sentence: regenerate ONCE with a stronger repetition penalty
+                raw = generate_remote(messages=messages, max_new_tokens=budget, enable_thinking=enable_thinking,
+                                      repetition_penalty=LOOP_RETRY_PENALTY)
+                _reasoning, retry = _strip_think(raw)
+                remainder = retry or remainder
+            remainder = collapse_repetition(remainder)
             final_answer = remainder or "(geen antwoord ontvangen -- het model had meer tokens nodig dan beschikbaar)"
             deduped_sources = _dedup(sources)
             return AdvisorResponse(
@@ -302,7 +371,7 @@ def ask_orchard_advisor(
     reasoning, remainder = _strip_think(raw)
     if reasoning:
         reasoning_parts.append(reasoning)
-    final_answer = remainder or "(geen antwoord ontvangen)"
+    final_answer = collapse_repetition(remainder) or "(geen antwoord ontvangen)"
     deduped_sources = _dedup(sources)
     return AdvisorResponse(
         answer=final_answer,
@@ -410,7 +479,7 @@ def ask_orchard_advisor_stream(
 
             tool_call = _extract_tool_call(remainder) if _hop < max_tool_hops else None
             if tool_call is None:
-                final_answer = remainder or "(geen antwoord ontvangen -- het model had meer tokens nodig dan beschikbaar)"
+                final_answer = collapse_repetition(remainder) or "(geen antwoord ontvangen -- het model had meer tokens nodig dan beschikbaar)"
                 if not remainder:
                     yield final_answer  # nothing was streamed yet for this (rare) double-cutoff case
                 deduped_sources = _dedup(sources)
@@ -447,7 +516,7 @@ def ask_orchard_advisor_stream(
                 yield item
         if reasoning:
             reasoning_parts.append(reasoning)
-        final_answer = remainder or "(geen antwoord ontvangen)"
+        final_answer = collapse_repetition(remainder) or "(geen antwoord ontvangen)"
         if not remainder:
             yield final_answer
         deduped_sources = _dedup(sources)

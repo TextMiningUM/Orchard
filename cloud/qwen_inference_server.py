@@ -42,6 +42,7 @@ Run (inside tmux or as a systemd service, so it survives SSH disconnects):
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import subprocess
@@ -139,7 +140,25 @@ class _EngineLoop:
 _engine_loop = _EngineLoop()
 _engine_cache: dict[tuple[str, str], tuple] = {}  # (domain, weights) -> (AsyncLLM, tokenizer, lora_request|None)
 _last_used: dict[tuple[str, str], float] = {}
-_cache_lock = threading.Lock()
+_cache_lock = threading.Lock()  # serialises loading / eviction (held for the whole ~80 s of a load)
+
+# Only ONE engine can live on the A30: each vLLM engine reserves GPU_MEMORY_UTILIZATION (85%) of the card, so a second one
+# (e.g. a LoRA adapter next to the base model) cannot initialise -- the failure was "Engine core initialization failed" for
+# whichever model was requested second. Loading a model therefore replaces the resident one, after its running requests end.
+_loading: dict[tuple[str, str], float] = {}  # key -> start time, readable by /status WITHOUT taking _cache_lock
+_inflight: dict[tuple[str, str], int] = {}
+_inflight_cv = threading.Condition()
+_load_seconds: list[float] = []  # measured durations of real loads (the UI quotes the median)
+DEFAULT_LOAD_S = 80.0  # measured on the pod: 63 s engine init + weights
+EVICT_WAIT_S = 120.0
+
+
+async def _shutdown_engine(engine) -> None:
+    """vLLM's ``AsyncLLM.shutdown()`` is a plain method in the installed version (it used to be a coroutine): handle both,
+    otherwise the teardown raised 'A coroutine object is required' and left the engine behind."""
+    result = engine.shutdown()
+    if inspect.isawaitable(result):
+        await result
 
 
 def _resolve_model_source(weights: str, paths: AgentPaths) -> tuple[str, "LoRARequest | None"]:
@@ -195,15 +214,66 @@ async def _build_engine(domain: str, weights: str):
     return engine, tok, lora
 
 
+def _wait_idle(key: tuple[str, str], timeout_s: float) -> None:
+    """Blocks until no request is running on ``key`` (or the timeout passes)."""
+    deadline = time.time() + timeout_s
+    with _inflight_cv:
+        while _inflight.get(key, 0) > 0 and time.time() < deadline:
+            _inflight_cv.wait(timeout=1.0)
+
+
+def _drop_engine(key: tuple[str, str]) -> None:
+    """Shuts one cached engine down (caller holds ``_cache_lock``)."""
+    engine, _tok, _lora = _engine_cache.pop(key)
+    _last_used.pop(key, None)
+    try:
+        _engine_loop.run(_shutdown_engine(engine))
+    except Exception as e:  # noqa: BLE001 -- best-effort teardown
+        print(f"[unload] shutdown error for {key[0]}/{key[1]}: {e}", flush=True)
+
+
 def _get_engine(domain: str, weights: str):
     key = (domain, weights)
     with _cache_lock:
         if key not in _engine_cache:
+            for other in [k for k in _engine_cache if k != key]:
+                print(f"Evicting {other[0]}/{other[1]} to make room for {domain}/{weights} (one engine fits the GPU).", flush=True)
+                _wait_idle(other, EVICT_WAIT_S)
+                _drop_engine(other)
             print(f"Loading {domain}/{weights} ...", flush=True)
-            _engine_cache[key] = _engine_loop.run(_build_engine(domain, weights))
-            print(f"Loaded {domain}/{weights}.", flush=True)
+            started = time.time()
+            _loading[key] = started
+            try:
+                _engine_cache[key] = _engine_loop.run(_build_engine(domain, weights))
+            finally:
+                _loading.pop(key, None)
+            _load_seconds.append(time.time() - started)
+            del _load_seconds[:-5]
+            print(f"Loaded {domain}/{weights} in {time.time() - started:.0f}s.", flush=True)
         _last_used[key] = time.time()
         return _engine_cache[key]
+
+
+class _use_engine:
+    """``with _use_engine(domain, weights) as (engine, tok, lora):`` -- loads if needed and marks the engine busy so an
+    eviction for another model waits for this request instead of killing it mid-generation."""
+
+    def __init__(self, domain: str, weights: str) -> None:
+        self.key = (domain, weights)
+
+    def __enter__(self):
+        while True:
+            engine = _get_engine(*self.key)
+            with _inflight_cv:
+                if self.key in _engine_cache:  # could have been evicted between the two steps
+                    _inflight[self.key] = _inflight.get(self.key, 0) + 1
+                    return engine
+
+    def __exit__(self, *exc) -> None:
+        with _inflight_cv:
+            _inflight[self.key] = max(0, _inflight.get(self.key, 1) - 1)
+            _inflight_cv.notify_all()
+        _last_used[self.key] = time.time()
 
 
 def _unload_engines(domain: str | None, weights: str | None) -> list[dict]:
@@ -212,12 +282,8 @@ def _unload_engines(domain: str | None, weights: str | None) -> list[dict]:
         for key in list(_engine_cache):
             d, w = key
             if (domain is None or d == domain) and (weights is None or w == weights):
-                engine, _tok, _lora = _engine_cache.pop(key)
-                try:
-                    _engine_loop.run(engine.shutdown())
-                except Exception as e:  # noqa: BLE001 -- best-effort teardown
-                    print(f"[unload] shutdown error for {d}/{w}: {e}", flush=True)
-                _last_used.pop(key, None)
+                _wait_idle(key, EVICT_WAIT_S)
+                _drop_engine(key)
                 removed.append({"domain": d, "weights": w})
     return removed
 
@@ -294,6 +360,18 @@ def _stream_deltas(engine, lora, prompt: str, sp: SamplingParams):
     yield from _engine_loop.stream(_gen)
 
 
+def status_payload() -> dict:
+    """What ``GET /status`` returns. Never takes ``_cache_lock`` (it is held for the whole of a model load), so the status
+    stays answerable WHILE a model loads -- that is exactly when the UI asks for it."""
+    now = time.time()
+    loaded = [{"domain": d, "weights": w, "idle_s": round(now - _last_used.get((d, w), now), 1)}
+              for d, w in list(_engine_cache)]
+    loading = [{"domain": d, "weights": w, "elapsed_s": round(now - t, 1)} for (d, w), t in list(_loading.items())]
+    typical = sorted(_load_seconds)[len(_load_seconds) // 2] if _load_seconds else DEFAULT_LOAD_S
+    return {"gpu": _gpu_status(), "loaded_models": loaded, "loading": loading, "typical_load_s": round(typical),
+            "idle_unload_s": IDLE_UNLOAD_S, "backend": "vllm"}
+
+
 class Handler(BaseHTTPRequestHandler):
     def _write_json(self, status: int, payload: dict) -> None:
         self.send_response(status)
@@ -330,38 +408,35 @@ class Handler(BaseHTTPRequestHandler):
         domain = body.get("domain", "Orchard")
         weights = body.get("weights", "W0_base")
         enable_thinking = bool(body.get("enable_thinking", False))
-        engine, tok, lora = _get_engine(domain, weights)
-        prompt = _render_prompt(tok, body["messages"], enable_thinking)
-        sp = _sampling_params(body)
-        text = _engine_loop.run(_agenerate_full(engine, lora, prompt, sp))
-        _last_used[(domain, weights)] = time.time()
+        with _use_engine(domain, weights) as (engine, tok, lora):
+            prompt = _render_prompt(tok, body["messages"], enable_thinking)
+            sp = _sampling_params(body)
+            text = _engine_loop.run(_agenerate_full(engine, lora, prompt, sp))
         self._write_json(200, {"text": text})
 
     def _handle_generate_stream(self, body: dict) -> None:
         domain = body.get("domain", "Orchard")
         weights = body.get("weights", "W0_base")
         enable_thinking = bool(body.get("enable_thinking", False))
-        engine, tok, lora = _get_engine(domain, weights)
-        prompt = _render_prompt(tok, body["messages"], enable_thinking)
-        sp = _sampling_params(body)
+        with _use_engine(domain, weights) as (engine, tok, lora):
+            prompt = _render_prompt(tok, body["messages"], enable_thinking)
+            sp = _sampling_params(body)
 
-        self.send_response(200)
-        self.send_header("Content-Type", "application/x-ndjson")
-        self.send_header("Connection", "close")
-        self.end_headers()
-        self.close_connection = True
-        full_text = ""
-        try:
-            for delta in _stream_deltas(engine, lora, prompt, sp):
-                full_text += delta
-                self.wfile.write((json.dumps({"delta": delta}) + "\n").encode("utf-8"))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
+            full_text = ""
+            try:
+                for delta in _stream_deltas(engine, lora, prompt, sp):
+                    full_text += delta
+                    self.wfile.write((json.dumps({"delta": delta}) + "\n").encode("utf-8"))
+                    self.wfile.flush()
+            except Exception as e:  # noqa: BLE001 -- report inline, the 200 header is already sent
+                self.wfile.write((json.dumps({"error": str(e)}) + "\n").encode("utf-8"))
                 self.wfile.flush()
-        except Exception as e:  # noqa: BLE001 -- report inline, the 200 header is already sent
-            self.wfile.write((json.dumps({"error": str(e)}) + "\n").encode("utf-8"))
-            self.wfile.flush()
-            return
-        finally:
-            _last_used[(domain, weights)] = time.time()
+                return
         self.wfile.write((json.dumps({"done": True, "text": full_text.strip()}) + "\n").encode("utf-8"))
         self.wfile.flush()
 
@@ -370,14 +445,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self._write_json(200, {"status": "ok"})
         elif path == "/status":
-            now = time.time()
-            with _cache_lock:
-                loaded = [
-                    {"domain": d, "weights": w, "idle_s": round(now - _last_used.get((d, w), now), 1)}
-                    for d, w in _engine_cache
-                ]
-            self._write_json(200, {"gpu": _gpu_status(), "loaded_models": loaded,
-                                   "idle_unload_s": IDLE_UNLOAD_S, "backend": "vllm"})
+            self._write_json(200, status_payload())
         else:
             self.send_response(404)
             self.end_headers()

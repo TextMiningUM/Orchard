@@ -64,8 +64,10 @@ rekentools mag raadplegen voor een onderbouwd antwoord.
 
 Een antwoord duurt soms een halve minuut — zolang de melding *"De adviseur denkt na..."* zichtbaar is,
 is het systeem bezig; even geduld dus. Als je een paar minuten niets gevraagd hebt, duurt de eerste
-volgende vraag ook iets langer: het model wordt dan automatisch van het rekenproces afgehaald om geen
-onnodige capaciteit vast te houden, en laadt bij de eerstvolgende vraag weer opnieuw.
+volgende vraag ook langer: het model wordt dan automatisch van het rekenproces afgehaald om geen
+onnodige capaciteit vast te houden en moet bij de eerstvolgende vraag opnieuw geladen worden. Dat kost
+ongeveer anderhalve minuut extra; de app laat dat dan vooraf zien ("het taalmodel wordt geladen: ongeveer
+80 seconden"), en in de zijbalk staat of het model nu geladen is.
 
 Je kunt ook **vervolgvragen** stellen (bijvoorbeeld eerst *"wat is suzuki-fruitvlieg?"* en dan *"en
 is dat erg voor kersen?"*) — het model houdt rekening met wat je eerder in dezelfde chat hebt

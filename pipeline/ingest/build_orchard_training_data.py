@@ -87,8 +87,9 @@ def card_prompts(rec: dict) -> list[str]:
             f"Wat moet ik doen bij dit probleem: {rec['title'][0].lower() + rec['title'][1:]}?"]
 
 
-def user_message(question: str, context: str) -> str:
-    return f"Vraag: {question}\n\nRelevante kennisbank-fragmenten:\n{context}"
+def user_message(question: str, context: str, tool_instr: str = "") -> str:
+    """Same layout as ``orchard_agent._build_prompt_state`` so training prompts equal inference prompts."""
+    return f"Vraag: {question}\n\nRelevante kennisbank-fragmenten:\n{context}" + (f"\n\n{tool_instr}" if tool_instr else "")
 
 
 def reflection_critique(rec: dict) -> str:
@@ -98,7 +99,7 @@ def reflection_critique(rec: dict) -> str:
 
 
 def build_card_datasets(records: list[dict], retrieve_fn, format_context, format_sources, system_prompt: str,
-                        held_out: set[int], index_chunks: dict[str, dict]) -> tuple[dict[str, list[dict]], Counter]:
+                        held_out: set[int], index_chunks: dict[str, dict], tool_instr: str = "") -> tuple[dict[str, list[dict]], Counter]:
     """``retrieve_fn(question) -> hits`` (the live retriever). Returns datasets + a counter of why cards were skipped."""
     out: dict[str, list[dict]] = {"sft_cards": [], "sft_cards_unverified": [], "dpo_cards": [], "reflection_cards": []}
     skipped: Counter = Counter()
@@ -117,8 +118,8 @@ def build_card_datasets(records: list[dict], retrieve_fn, format_context, format
                 skipped["card_not_retrieved"] += 1
                 continue  # the answer would not be grounded in the prompt: never train that
             src = format_sources([h for h in hits if h["chunk_id"] == rec["chunk_id"]] or [card_chunk])
-            source_line = "Bronnen: " + "; ".join(src) + f" (kaart {rec['card_no']}, bron-status: {rec['sources_status']})."
-            prompt = user_message(q, format_context(hits))
+            source_line = "Bronnen: " + "; ".join(src) + "."  # no card number / status: SFT v1 leaked "(kaart N, bron-status: ...)" into answers
+            prompt = user_message(q, format_context(hits), tool_instr)
             good, bad = card_answer(rec, source_line), worst_case_answer(rec, source_line)
             meta = {"card_no": rec["card_no"], "chunk_id": rec["chunk_id"], "verified": verified,
                     "sources_status": rec["sources_status"]}
@@ -261,6 +262,77 @@ def pair_feedback(records: list[dict]) -> tuple[list[dict], dict]:
     return pairs, stats
 
 
+# ── compliance (dose / authorisation / product-selection questions) ─────────────────────
+# SFT v1 on cards alone made the guardrail collapse (87% -> 30%): the cards never contain a question that asks for a dose or
+# a product, so the model answered such questions as if they were cards (and without a Ctgb reference). The remedy is explicit
+# training examples. The products below are DELIBERATELY disjoint from every product named in the gold and held-out eval sets
+# (test_compliance_training_questions_are_disjoint_from_the_eval_sets), so the guardrail measurement stays honest.
+TRAIN_PRODUCTS = ["Karate Zeon", "Mospilan", "Score", "Flint", "Nimrod", "Scala", "Cantus", "Runner", "Topas", "Teldor",
+                  "Luna Privilege", "Pyrus", "Rubigan", "Systhane", "Chorus"]
+TRAIN_TARGETS = ["kersenvlieg", "suzuki-fruitvlieg", "zwarte kersenluis", "Monilia", "hagelschot", "bacteriekanker",
+                 "spint", "bladvlekkenziekte", "meeldauw", "schorskever", "kersenbladwesp"]
+_DOSE_Q = ["Hoeveel {p} moet ik per hectare nemen tegen {t}?", "Welke dosering van {p} geldt er voor kersen?",
+           "Wat is de juiste hoeveelheid {p} per 100 liter water bij {t}?",
+           "Kan ik {p} dubbel doseren als de druk van {t} hoog is?", "Hoeveel spuitvloeistof per hectare gebruik ik met {p}?",
+           "Hoe lang moet ik wachten na een bespuiting met {p} voordat ik kan plukken?"]
+_AUTH_Q = ["Is {p} toegelaten in de kersenteelt?", "Mag ik {p} nog gebruiken tegen {t}?",
+           "Staat {p} op de lijst van toegelaten middelen voor kers?", "Is {p} sinds kort verboden voor kers?",
+           "Kan ik {p} biologisch gebruiken tegen {t}?"]
+_SELECT_Q = ["Welk middel werkt het beste tegen {t} en hoeveel moet ik gebruiken?", "Geef me een spuitschema met producten en hoeveelheden tegen {t}.",
+             "Wat moet ik precies spuiten tegen {t}, en in welke concentratie?"]
+_DOSE_A = ["Een dosering of concentratie noem ik niet: die hangt af van het product, de toelating en het gebruiksvoorschrift. "
+           "Raadpleeg het etiket van het middel en de Ctgb-databank (ctgb.nl) voor de toegestane dosering, het aantal toepassingen en de wachttijd.",
+           "Daar geef ik geen getal voor, want de juiste dosering en wachttijd staan op het etiket en hangen af van de actuele toelating. "
+           "Kijk in de Ctgb-databank (ctgb.nl) en lees het etiket van het product."]
+_AUTH_A = ["Of {p} op dit moment is toegelaten voor kers kan ik niet vaststellen: toelatingen veranderen en de kennisbank bevat geen toelatingsstatus. "
+           "Controleer dat altijd in de Ctgb-databank (ctgb.nl) en op het etiket.",
+           "Die toelatingsstatus kan ik niet beoordelen; de kennisbank geeft geen actuele toelating. De Ctgb-databank (ctgb.nl) en het etiket zijn "
+           "leidend voor wat u op kers mag gebruiken."]
+_SELECT_A = ["Een concreet middel, schema of hoeveelheid noem ik niet: voor kers vindt u in de Ctgb-databank (ctgb.nl) en op het etiket "
+             "welke middelen mogen worden gebruikt en in welke dosering.",
+             "Ik geef geen product- of doseeradvies. Welke middelen u voor kers mag gebruiken, en hoeveel, vindt u in de Ctgb-databank (ctgb.nl) "
+             "en op het etiket."]
+
+
+def compliance_extra(target: str, hits: list[dict], cards_by_chunk: dict[str, dict]) -> str:
+    """When the retriever returns a verified, dose-free problem card about ``target``, append its (non-chemical) action so the refusal still helps."""
+    stem = re.sub(r"[^a-z]", "", target.lower())[:6]
+    for h in hits:
+        rec = cards_by_chunk.get(h["chunk_id"])
+        if not rec or rec["sources_status"] not in VERIFIED_STATUSES or mentions_dose(rec):
+            continue
+        hay = re.sub(r"[^a-z ]", "", (rec["title"] + " " + rec["observation"]).lower())
+        if stem and stem in hay.replace(" ", ""):
+            return f"\n\nWat de kennisbank wel noemt (zonder middelen): {rec['action']}"
+    return ""
+
+
+def build_compliance_dataset(retrieve_fn, format_context, system_prompt: str, tool_instr: str, cards_by_chunk: dict[str, dict],
+                             n: int = 60, seed: int = 21) -> list[dict]:
+    rng = random.Random(seed)
+    kinds = [("dose", _DOSE_Q, _DOSE_A, 0.4), ("auth", _AUTH_Q, _AUTH_A, 0.33), ("select", _SELECT_Q, _SELECT_A, 0.27)]
+    questions: list[tuple[str, str, str, str, str]] = []
+    seen: set[str] = set()
+    guard = 0
+    while len(questions) < n and guard < n * 50:
+        guard += 1
+        kind, qs, answers, _w = rng.choices(kinds, weights=[k[3] for k in kinds])[0]
+        p, t = rng.choice(TRAIN_PRODUCTS), rng.choice(TRAIN_TARGETS)
+        q = rng.choice(qs).format(p=p, t=t)
+        if q in seen:
+            continue
+        seen.add(q)
+        questions.append((kind, q, rng.choice(answers).format(p=p, t=t), p, t))
+    rows = []
+    for kind, q, answer, p, t in questions:
+        hits = retrieve_fn(q)
+        extra = compliance_extra(t, hits, cards_by_chunk) if kind != "auth" else ""
+        text = answer + extra + "\n\nBronnen: Ctgb-databank (ctgb.nl) en het etiket van het middel."
+        rows.append({"messages": _chat(system_prompt, user_message(q, format_context(hits), tool_instr), text),
+                     "meta": {"kind": f"compliance_{kind}", "product": p, "target": t, "question": q, "verified": True}})
+    return rows
+
+
 # ── driver ──────────────────────────────────────────────────────────────────────────────
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -270,7 +342,8 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
 def split_by_card(rows: list[dict], val_fraction: float = 0.1) -> tuple[list[dict], list[dict]]:
     """Deterministic train/val split BY CARD (both phrasings of one card stay on the same side)."""
     def is_val(row: dict) -> bool:
-        key = str(row["meta"].get("card_no", row["meta"].get("entry_id", row["meta"].get("month", row["meta"].get("date", "")))))
+        m = row["meta"]
+        key = str(m.get("card_no", m.get("entry_id", m.get("month", m.get("date", m.get("question", ""))))))
         return int(hashlib.md5(key.encode()).hexdigest(), 16) % 1000 < val_fraction * 1000
     train = [r for r in rows if not is_val(r)]
     return train, [r for r in rows if is_val(r)]
@@ -281,26 +354,45 @@ def main(argv: list[str] | None = None) -> dict:
     out_dir = paths.cache_dir / "training"
     out_dir.mkdir(exist_ok=True)
 
-    from pipeline.orchard_agent import SYSTEM_PROMPT
+    from pipeline.orchard_agent import SYSTEM_PROMPT, TOOL_CALL_INSTR
     from pipeline.orchard_eval import load_gold
     from pipeline.orchard_rag import format_context, format_sources, load_index, retrieve
+    from pipeline.orchard_tool_catalog import build_tool_catalog
 
     index = load_index(paths)
     if index is None:
         raise SystemExit("RAG-index ontbreekt.")
     records = [json.loads(line) for line in (paths.cache_dir / "orchard_oac_cards.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
-    gold = load_gold(paths.gold_file)
+    gold = load_gold(paths.gold_file) + (load_gold(paths.heldout_file) if paths.heldout_file.exists() else [])
     doc_id = records[0]["doc_id"]
     held_out = gold_card_numbers(gold, doc_id)
 
+    catalog = build_tool_catalog(None, None, index)  # no weather snapshot, as in the evaluation
+    tool_instr = TOOL_CALL_INSTR.format(max_hops=3, tool_list="\n".join(f"- {t.name}: {t.description}" for t in catalog.values()))
     datasets, skipped = build_card_datasets(records, lambda q: retrieve(q, index, k=6), format_context, format_sources,
-                                            SYSTEM_PROMPT, held_out, index.chunk_by_id)
+                                            SYSTEM_PROMPT, held_out, index.chunk_by_id, tool_instr)
     report: dict = {"cards": len(records), "held_out_gold": sorted(held_out), "skipped": dict(skipped), "files": {}}
     for name, rows in datasets.items():
         train, val = split_by_card(rows)
         write_jsonl(out_dir / f"{name}_train.jsonl", train)
         write_jsonl(out_dir / f"{name}_val.jsonl", val)
         report["files"][name] = {"train": len(train), "val": len(val)}
+
+    cards_by_chunk = {r["chunk_id"]: r for r in records}
+    compliance = build_compliance_dataset(lambda q: retrieve(q, index, k=6), format_context, SYSTEM_PROMPT, tool_instr, cards_by_chunk)
+    c_train, c_val = split_by_card(compliance)
+    write_jsonl(out_dir / "sft_compliance_train.jsonl", c_train)
+    write_jsonl(out_dir / "sft_compliance_val.jsonl", c_val)
+    report["files"]["sft_compliance"] = {"train": len(c_train), "val": len(c_val),
+                                         "kinds": dict(Counter(r["meta"]["kind"] for r in compliance)),
+                                         "with_card_extra": sum("Wat de kennisbank wel noemt" in r["messages"][2]["content"] for r in compliance)}
+    # SFT v2 = verified cards + compliance, shuffled deterministically so the two kinds are interleaved
+    card_train, card_val = split_by_card(datasets["sft_cards"])
+    for split, card_part, comp_rows in (("train", card_train, c_train), ("val", card_val, c_val)):
+        mixed = card_part + comp_rows
+        random.Random(5).shuffle(mixed)
+        write_jsonl(out_dir / f"sft_v2_{split}.jsonl", mixed)
+        report["files"][f"sft_v2_{split}"] = {"examples": len(mixed), "cards": len(card_part), "compliance": len(comp_rows)}
 
     db = paths.logbooks_dir / "orchard_logbook.db"
     if db.exists():

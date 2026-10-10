@@ -98,6 +98,7 @@ Bronnen voor dit ontwerp:
   - [G.25 RAG herbouwd uit de gestructureerde JSON: bge-m3, geen reranker](#sec-g25)
   - [G.26 Procedure: hoe we RAG bouwen en QC doen, en de Code Library](#sec-g26)
   - [G.27 KG, PG, OAC, logboek-RAG, trainingsdata, antwoord-eval en analyse (2026-10-10)](#sec-g27)
+  - [G.28 Meetbetrouwbaarheid, held-out set, reward, rejection sampling en SFT-rondes (2026-10-10)](#sec-g28)
 
 ---
 
@@ -810,14 +811,16 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
    bewuste stubs (zie [C.4](#sec-c4)/[C.5](#sec-c5)).
 4. **RAG v0**: alleen Track 1 (WUR/Actua Steenfruit/Ctgb), nog zonder logboeken. — ✅ **GEDAAN**
    (7 documenten, dense retrieval + reranking, zie [G.5](#sec-g5)/[G.6](#sec-g6)).
-5. **Eerste Mistral-SFT**: basis vraag-antwoord-gedrag op Track 1-data. — ⬜ **NOG NIET GESTART.**
+5. **Eerste Mistral-SFT**: basis vraag-antwoord-gedrag op Track 1-data. — 🟡 **EERSTE RONDE GEDAAN (2026-10-10, [G.28](#sec-g28))**: QLoRA op Qwen3-8B
+   (`sft_v2`, 95 kaarten + 48 compliance-voorbeelden): held-out volledige dekking 55,6 → 86,7 %, guardrail ≥ basismodel; nog niet de standaard in productie (zie G.28 punt 5).
    Qwen3-8B draait wel al live (basismodel, geen fine-tuning), met RAG+tools+CoT als tussenstap i.p.v.
    te wachten op een trainingsronde — zie de afwijking hierboven en [G.6](#sec-g6).
 6. **Track 2 erbij**: zodra OCR klaar is, logboek-RAG + conversational SFT-data toevoegen. — 🟡
    **DEELS**: de logboek-data wordt al live gebruikt door Patroonherkenning/Seizoenswaarschuwingen/
    Gebruik van Middelen ([G.7](#sec-g7)-[G.9](#sec-g9)), en sinds 2026-10-10 is het logboek ook een lokale RAG-bron voor de chatbot
    ([G.27](#sec-g27)) plus open-book SFT-data (lokaal); een conversational-SFT-dataset op echte antwoorden bestaat nog niet.
-7. **DPO**: biologisch-vs-chemisch-voorkeur. — ⬜ **NOG NIET GESTART** als trainingsstap; wel is er nu
+7. **DPO**: biologisch-vs-chemisch-voorkeur. — 🟡 **DATA KLAAR, RONDE NIET GEDRAAID** ([G.28](#sec-g28)): 69 on-policy paren uit rejection sampling met een
+   deterministische reward; na SFT v2 zijn er geen verliezende samples meer op de validatieprompts, dus DPO wacht op een bredere promptverdeling. Ook
    een UI-mechanisme om voorkeursparen te VERZAMELEN (duim omhoog/omlaag op elk antwoord, zie
    [G.6](#sec-g6)) — de daadwerkelijke DPO-trainingsronde zelf volgt later, zodra er genoeg paren zijn.
 8. **Streamlit-dashboard v0**: alleen het Boomgaard Dashboard + Chat-pagina. — ✅ **GEDAAN, en ver
@@ -938,9 +941,8 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
     maar geen geëxpliciteerde reward-functie die meerdere doelen afweegt (bv. feitelijke
     juistheid/grounding, veiligheid rond doseringen, bruikbaarheid/beknoptheid, en op termijn
     mogelijk ECHTE opbrengst-/oogstuitkomsten). Zonder zo'n expliciet ontwerp blijft optimalisatie
-    beperkt tot losse DPO-voorkeursparen zonder een gewogen, samengesteld doel. **Nog niet
-    gestart** — op de lijst voor een volgende versie, te ontwerpen zodra er genoeg feedback-
-    volume is om zinvol tegen te optimaliseren.
+    beperkt tot losse DPO-voorkeursparen zonder een gewogen, samengesteld doel. **ONTWORPEN (2026-10-10, [G.28](#sec-g28))**: `pipeline/orchard_reward.py`, deterministisch, met
+    compliance-poort; nog zonder extern opbrengstsignaal.
 18. **RAG-chunking is nu nog een simpele, per-pagina woordenteller-pack — Auto Pilot's eigen
     `pipeline/ingest/build_rag.py` doet dit merkbaar slimmer** en is een directe kandidaat om
     over te nemen: (a) secties worden daar PER DOCUMENT (niet per pagina) opgebouwd, zodat een
@@ -2112,3 +2114,80 @@ nog geen DPO-materiaal (Deel F #11).
    outcome-signaal nodig (oogst/schade per seizoen, Deel F #17).
 6. **Duim-feedback** is te dun (4 records); verzamelen blijft aan, maar paren komen vooral uit stap 4.
 7. Pod: de publieke app draait nu hybride + nieuwe prompt + 1500 tokens + dosering-redactie; de logboek-tool staat daar uit.
+
+<a id="sec-g28"></a>
+## G.28 Meetbetrouwbaarheid, held-out set, reward, rejection sampling en SFT-rondes (2026-10-10)
+
+Dit voert de aanbevelingen van [G.27](#sec-g27) uit (volgorde: meting → held-out → reward → rejection sampling → SFT).
+
+**1. Meetbetrouwbaarheid.** `run_orchard_eval --repeats N` draait de antwoordmeting N× (parallel) en rapporteert gemiddelde ± sd per maat
+(`aggregate_answer_runs`); `--set gold|heldout|both`, `--weights <adapter>`, `--ids`, `--rep-penalty`. De baseline (basismodel, 114 vragen, 3×):
+grounding 96,8 ± 1,3 %, feitendekking 86,8 ± 3,6 %, **volledig 74,1 ± 7,8 %**, guardrail 86,7 ± 7,6 %; 29% van de vragen geeft van run tot run een andere
+feitendekking. Dus: verschillen onder ± 5–8 pt zijn ruis; alleen herhaalde runs tellen. Een mid-run wegvallende SSH-tunnel gaf 228 "fouten"
+(ConnectionError) in één run; de client heeft nu keepalive en de eval verbindt opnieuw en herhaalt (2×).
+
+**2. Held-out set v2** (`Orchard_Eval/orchard_heldout_qa.json`, committed): 15 inhoudsvragen over kaarten die NIET in de gouden set zitten en nooit
+in trainingsdata komen (de bouwer sluit ze uit), in eigen formulering, plus 16 extra guardrail-vragen (doseringen, toelating, spuitschema's,
+"hogere dosering dan op het etiket"). Guardrail-controle is uitgebreid met `DOSE`, `DOSE2` (per volume) en `CLAIM`: een ongekwalificeerde uitspraak dat een
+middel (niet) is toegelaten — het advies kan dat niet weten (Ctgb-lookup is een gedocumenteerde stub); "ik kan niet zeggen of X is toegelaten" is
+géén claim (voorbehoud-detectie per zin). Beperking: n = 15, en de controle heeft false positives (een antwoord dat de vraag letterlijk herhaalt,
+"…welk middel is toegelaten…", wordt als claim gevlagd).
+
+| Basismodel | gouden set (in-sample voor keuzes) | held-out v2 |
+|---|---|---|
+| feitendekking gem. / volledig | 88,8 / 77,6 % | **75,9 / 55,6 %** |
+| guardrail | 91,7 % | 85,4 % |
+
+De gouden set overschat dus het echte niveau (≈ 13 pt op dekking): alle conclusies uit [G.25](#sec-g25)/[G.27](#sec-g27) moeten tegen de held-out set gelezen worden.
+
+**3. Reward-functie** (`pipeline/orchard_reward.py`, Deel F #17 — nu concreet): volledig deterministisch, geen model. `reward = gate × gewogen som` van
+*coverage* (0,35; sleutelfeiten), *focus* (0,20; aandeel inhoudswoorden in het antwoord dat in de bronkaart of de vraag staat — straft meeslepen van
+buurfragmenten), *grounding* (0,10; "Bronnen:"-regel), *numeric* (0,15; getallen in het antwoord die ook in vraag/context staan — vangt verzonnen getallen),
+*complete* (0,10; niet afgekapt), *concise* (0,10). De **poort** is 0 bij een dosering per oppervlak/volume of een ongekwalificeerde toelatings-claim: een lek is
+nooit goed te maken met volledigheid. Gewichten staan op één plek (`RewardConfig`). Sleutelfeiten voor kaarten zijn een ruwe proxy (langste inhoudswoord per actiestap, 7-letter-stam).
+
+**4. Rejection sampling** (`ingest/build_orchard_rs_pairs.py`): per verified trainingsprompt N = 4 antwoorden van het basismodel (T = 0,8) + het kaart-referentieantwoord,
+gescoord met de reward; chosen = beste met schone poort, rejected = slechtste, mits verschil ≥ 0,15. Basismodel op 95 trainings- en 22 validatieprompts
+(468 samples): reward 0,83–0,85 vs referentie 0,96–1,0; **focus 0,48** (het model kopieert de juiste kaart maar vult aan uit buurfragmenten),
+coverage 0,92, **14 toelatings-claims (CLAIM)**, geen afgekapte of lege antwoorden. Dit leverde 54 + 15 on-policy DPO-paren (`dpo_rs_*.jsonl`, in 50+15 gevallen is chosen de
+kaart-referentie). **DPO is niet gedraaid**: na SFT v2 scoort het model op de validatieprompts overal 1,0 (88/88 samples), dus er zijn geen paren meer
+om van te leren, en 69 paren zijn te weinig voor een zinvolle DPO-ronde. De paren blijven bewaard voor als de promptverdeling verbreedt (bv. met prozachunks).
+
+**5. SFT** (`cloud/train_sft_qlora.py`, op de pod: QLoRA r = 16, 4-bit NF4 op bf16-basis, lr 1e-4, 3 epochs, loss alleen op het antwoord, prompt = exact het live-formaat
+inclusief tool-instructie en `enable_thinking=False`; ~ 18 min op de A30 met de Qwen-service tijdelijk uit). Geserveerd door vLLM als LoRA op de AWQ-basis
+(`weights=<mapnaam>`): de evaluatie meet dus de adapter zoals hij echt draait. Resultaten, 114 vragen, 3 runs, gemiddelde ± sd (punten):
+
+| Configuratie | gouden set dekking / volledig | held-out dekking / volledig | guardrail gouden / held-out | grounding | gem. lengte | latency |
+|---|---|---|---|---|---|---|
+| basismodel | 88,8 / 77,6 | 75,9 / 55,6 | 91,7 / 85,4 | 97 / 93 % | 875 / 937 tekens | 7,4 s |
+| **SFT v1** (alleen 95 kaarten) | 86,9 / 83,5 | 87,0 / 84,4 | **25,0 / 31,2** | 94 / 93 % | 1062 / 814 | 8,8 s |
+| **SFT v2** (+ 48 compliance-voorbeelden) | 88,4 / 85,2 | **86,7 / 86,7** | **100 / 91,7** | 99,6 / 97,8 % | 584 / 652 | 5,7 s |
+
+- **v1 faalde zoals verwacht en leerzaam**: de kaarten bevatten geen enkele vraag naar een dosering of product, dus het model beantwoordde zulke vragen als kaart,
+  zonder Ctgb-verwijzing (guardrail 87 → 30%: "catastrofaal vergeten" van de weigering) en lekte mijn bronregel-formaat ("(kaart N, bron-status: …)") in antwoorden.
+- **v2**: 48 compliance-voorbeelden (dosering / toelating / middelkeuze; trainings-producten bewust disjunct van elk product in de evalsets, getest;
+  het antwoord verwijst naar Ctgb + etiket, geeft nooit een getal of toelatingsstatus, en voegt een verified, dosis-vrije kaart-actie toe als er een is) en de bronregel zonder kaartnummer.
+  Resultaat: **held-out volledige dekking 55,6 → 86,7 %** (+31 pt, niet in-sample), gouden set volledig 77,6 → 85,2 %, guardrail ≥ basismodel, antwoorden 33% korter en 25% sneller.
+- **Eerlijke kanttekeningen**: (a) de held-out set heeft 15 inhoudsvragen (sd 0,0 = alle drie de runs gelijk: de adapter is bijna deterministisch); (b) guardrail-held-out
+  91,7 % deelt de *vorm* met de compliance-trainingsvragen (andere producten, vergelijkbare sjablonen) — de 100% op de gouden set is zuiverder dan de 91,7%;
+  (c) de gouden-set-dekking (gemiddeld) is niet verbeterd (88,8 → 88,4): de winst zit in *volledigheid* (alle feiten) en op onbekende kaarten; (d) eenvoudige
+  eenmalige vragen — meerstaps-gesprekken, tool-aanroepen met weersnapshot en lange chatgeschiedenis zijn niet gemeten.
+- **Bijwerking: herhalings-lussen.** Eén zin die ≥ 3× herhaald wordt: basismodel 0/342 antwoorden, v1 11/342, v2 5/342. Een repetition penalty loste het niet betrouwbaar op
+  (1,05: geen effect, 1,1: minder lussen maar 1 dosering-lek). Oplossing in de agent (`has_repetition_loop` / `collapse_repetition`): bij een lus één keer opnieuw genereren met penalty 1,1,
+  daarna herhaalde zinnen weghalen (alleen weghalen, nooit toevoegen). Op de 13 lus-gevoelige vragen × 6: **6/78 → 0/78 antwoorden met lus**, guardrail 100%. In het
+  streaming-pad is de al getoonde tekst niet terug te halen; daar wordt alleen het opgeslagen antwoord opgeschoond.
+- **Besluit uitrol**: de adapter staat op de pod (`_models/Orchard/sft_v2`, lokale back-up in `_models/` — gitignored) en is te kiezen met `ORCHARD_ADVISOR_WEIGHTS=sft_v2`
+  (terugdraaien: variabele weghalen). De **standaard blijft het basismodel**: de adapter is nog alleen getest op losse vragen, het streaming-pad kan nog een lus tonen, en de publieke pod is niet meer
+  read-only. Aanbeveling: eerst een korte gebruikerstest (chatgesprek met vervolgvragen en tools) en dan pas de variabele op de pod zetten.
+
+**6. Serverfix (naar aanleiding van "Engine core initialization failed" op de pod).** De inferentieserver hield per gewichtsset een eigen vLLM-engine (elk 85% van de A30) zonder de andere te
+verwijderen: het laden van een tweede model (adapter naast basis) faalde. Nu bevat de GPU één engine: een ander model vervangt het huidige nadat lopende verzoeken klaar zijn;
+`shutdown()` werkt met de huidige vLLM; `/status` blokkeert niet tijdens een laadbeurt en meldt `loading` + de gemeten `typical_load_s` (25–40 s warm, tot ± 80 s koud). De chatpagina toont vooraf
+"het taalmodel wordt geladen: ongeveer N seconden; het antwoord duurt daarna 5–30 s" (ook "kan even duren" als het model al geladen is), de zijbalk toont de modelstatus.
+
+**7. Volgende stappen.**
+1. Gebruikerstest van `sft_v2` in de chat (vervolgvragen, weersnapshot, tool-aanroepen); streaming-lusbeveiliging (afbreken bij ≥ 3 herhalingen); daarna standaard aanzetten.
+2. Held-out set vergroten (nu 15 inhoudsvragen) en een *tweede*, onafhankelijke guardrail-set met andere zinsbouw; de promptverdeling van de training verbreden (prozachunks, meerstaps, vervolgvragen) en dan opnieuw rejection sampling op de adapter voor een eerste echte DPO-ronde.
+3. 62 kaarten met "nog geen bron gevonden" laten verifiëren (nu uit de training gehouden) en LLM-OAC-extractie uit proza met letterlijke-span-verificatie.
+4. Logboek eerst verifiëren (0/487) vóór logboek-SFT; het logboek heeft geen uitkomsten, dus voor DPO/Reflectie uit eigen data is een uitkomstsignaal (oogst/schade per seizoen) nodig.
+5. Reward uitbreiden met een extern signaal (oogst/kwaliteit) en een echte sleutelfeiten-set per kaart in plaats van de proxy.

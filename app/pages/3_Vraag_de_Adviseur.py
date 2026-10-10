@@ -33,7 +33,7 @@ from orchard_common import compute_season_snapshot, render_sidebar  # noqa: E402
 
 import streamlit as st
 
-from pipeline.orchard_agent import ask_orchard_advisor_stream, build_history_messages  # noqa: E402
+from pipeline.orchard_agent import ADVISOR_WEIGHTS, ask_orchard_advisor_stream, build_history_messages  # noqa: E402
 from pipeline.orchard_chats import (  # noqa: E402
     ChatSession,
     ChatTurn,
@@ -47,7 +47,8 @@ from pipeline.orchard_chats import (  # noqa: E402
 from pipeline.orchard_feedback import build_feedback_record, save_feedback  # noqa: E402
 from pipeline.orchard_rag import load_index  # noqa: E402
 from pipeline.orchard_tools import check_ctgb_toelating, get_rain_nowcast  # noqa: E402
-from pipeline.qwen_remote import is_remote_server_up, reconnect_tunnel  # noqa: E402
+from pipeline.qwen_remote import (round_up_s, get_status, is_remote_server_up, model_state, reconnect_tunnel,  # noqa: E402
+                                  wait_notice)
 from datetime import datetime, timezone  # noqa: E402
 
 st.set_page_config(page_title="Vraag de Adviseur", layout="wide")
@@ -118,7 +119,12 @@ with st.sidebar:
 with st.sidebar:
     reconnect_tunnel()  # no-op if already reachable (e.g. running on the pod itself)
     if is_remote_server_up():
-        st.caption("Qwen3-8B-server: bereikbaar")
+        _state = model_state(get_status(), ADVISOR_WEIGHTS)
+        st.caption("Qwen3-8B-server: bereikbaar" + {
+            "ready": " (model geladen, antwoord binnen enkele seconden)",
+            "loading": " (model wordt nu geladen)",
+            "unloaded": f" (model niet geladen: de eerste vraag duurt ± {round_up_s(_state['eta_s'])} s extra)",
+        }.get(_state["state"], ""))
     else:
         st.caption(
             "Qwen3-8B-server: niet bereikbaar. Lokaal? Zet eerst een SSH-tunnel op "
@@ -290,11 +296,8 @@ if prompt := st.chat_input("Stel een vraag, bijv. 'is er vorstrisico deze week?'
             prior_turns = [(role, msg) for role, msg, _meta in st.session_state["chat_history"][:-1]]
             history = build_history_messages(prior_turns)
             try:
-                with st.spinner(
-                    "De adviseur denkt na... (bij een vraag die niet direct door een tool wordt "
-                    "beantwoord, raadpleegt het AI-model eerst de kennisbank, en het antwoord "
-                    "verschijnt zodra het model klaar is met redeneren)"
-                ):
+                notice = wait_notice(model_state(get_status(), ADVISOR_WEIGHTS))
+                with st.spinner(notice):
                     streamer = ask_orchard_advisor_stream(prompt, ctx, rag_index=_rag_index, history=history)
                     st.write_stream(streamer)
                 resp = streamer.response

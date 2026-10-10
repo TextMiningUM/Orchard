@@ -56,7 +56,7 @@ def _connection_error(base_url: str, e: Exception) -> ConnectionError:
 def generate_remote(
     messages: list[dict], domain: str = "Orchard", weights: str = "W0_base",
     max_new_tokens: int = 400, enable_thinking: bool = False,
-    base_url: str = DEFAULT_URL, timeout_s: float = 90.0, **sampling,
+    base_url: str = DEFAULT_URL, timeout_s: float = 300.0, **sampling,
 ) -> str:
     """POST a chat-style `messages` list to the Qwen inference server and return the
     generated text (non-streaming -- used for ReACT tool-call hops, where the full text is
@@ -81,7 +81,7 @@ def generate_remote(
 def stream_remote(
     messages: list[dict], domain: str = "Orchard", weights: str = "W0_base",
     max_new_tokens: int = 400, enable_thinking: bool = False,
-    base_url: str = DEFAULT_URL, timeout_s: float = 120.0, **sampling,
+    base_url: str = DEFAULT_URL, timeout_s: float = 300.0, **sampling,
 ):
     """Generator twin of `generate_remote()` -- POSTs to `/generate_stream` and yields
     incremental text deltas as they're generated (newline-delimited JSON over a
@@ -140,6 +140,7 @@ def reconnect_tunnel(base_url: str = DEFAULT_URL, timeout_s: float = 8.0) -> tup
                       "set these to the cloud pod's IP and SSH private key path.")
     cmd = ["ssh", "-N", "-L", "8811:127.0.0.1:8811", "-i", key,
           "-o", "StrictHostKeyChecking=accept-new", "-o", "ExitOnForwardFailure=yes",
+          "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=4",  # a tunnel that silently dies mid-run was the cause of an eval with 228 connection errors
           f"{user}@{host}"]
     try:
         creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -157,11 +158,53 @@ def reconnect_tunnel(base_url: str = DEFAULT_URL, timeout_s: float = 8.0) -> tup
 
 
 def get_status(base_url: str = DEFAULT_URL, timeout_s: float = 5.0) -> dict | None:
-    """GET /status -- {"gpu": {...}, "loaded_models": [...]}. Returns None (never raises)
-    if the server is unreachable, so a UI status panel can show "unavailable" instead of
-    crashing."""
+    """GET /status -- {"gpu": {...}, "loaded_models": [...], "loading": [...], "typical_load_s": n}. Returns None (never
+    raises) if the server is unreachable, so a UI status panel can show "unavailable" instead of crashing."""
     try:
         with urllib.request.urlopen(f"{base_url}/status", timeout=timeout_s) as resp:
             return json.loads(resp.read())
     except (urllib.error.URLError, OSError):
         return None
+
+
+DEFAULT_LOAD_S = 80
+TYPICAL_ANSWER_S = (5, 30)
+
+
+def model_state(status: dict | None, weights: str = "W0_base", domain: str = "Orchard") -> dict:
+    """Pure: what the user has to wait for, from a ``/status`` payload.
+
+    ``state``: ``unreachable`` (no server), ``ready`` (the requested weights are loaded), ``loading`` (a load is running
+    right now; ``remaining_s`` is the estimate for the rest of it) or ``unloaded`` (the first request will trigger a load,
+    which also replaces whatever other model is resident -- the pod holds only one). ``eta_s`` is the typical load time
+    measured by the server."""
+    if status is None:
+        return {"state": "unreachable", "eta_s": None, "remaining_s": None}
+    eta = int(status.get("typical_load_s") or DEFAULT_LOAD_S)
+    for m in status.get("loaded_models", []):
+        if m.get("domain") == domain and m.get("weights") == weights:
+            return {"state": "ready", "eta_s": eta, "remaining_s": 0}
+    for m in status.get("loading", []):
+        if m.get("domain") == domain and m.get("weights") == weights:
+            return {"state": "loading", "eta_s": eta, "remaining_s": max(5, round(eta - m.get("elapsed_s", 0)))}
+    return {"state": "unloaded", "eta_s": eta, "remaining_s": eta}
+
+
+def round_up_s(seconds: int, step: int = 10) -> int:
+    return int(-(-seconds // step) * step)
+
+
+def wait_notice(state: dict) -> str:
+    """The Dutch message shown while the advisor works. ALWAYS says an answer can take a while; when the model first has
+    to be loaded it says so and for how long (about, rounded)."""
+    lo, hi = TYPICAL_ANSWER_S
+    answer = f"Het antwoord zelf duurt daarna meestal {lo}-{hi} seconden"
+    if state["state"] == "unloaded":
+        return (f"Het taalmodel (Qwen3-8B) staat nog niet in het geheugen van de server en wordt nu geladen: dat duurt "
+                f"ongeveer {round_up_s(state['eta_s'])} seconden. {answer}. Even geduld.")
+    if state["state"] == "loading":
+        return (f"Het taalmodel (Qwen3-8B) wordt op dit moment geladen: nog ongeveer {round_up_s(state['remaining_s'])} "
+                f"seconden. {answer}. Even geduld.")
+    return (f"De adviseur denkt na... Een antwoord kan even duren ({lo}-{hi} seconden, soms langer bij een lange of "
+            "ingewikkelde vraag): het model raadpleegt eerst de kennisbank en het antwoord verschijnt zodra het "
+            "klaar is met redeneren.")

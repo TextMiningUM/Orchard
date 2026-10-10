@@ -1,9 +1,9 @@
 """Training-data extraction: the safeguards matter more than the volume."""
 from __future__ import annotations
 
-from pipeline.ingest.build_orchard_training_data import (LOGBOOK_SYSTEM_ADDENDUM, build_card_datasets,
-                                                         build_logbook_dataset, gold_card_numbers, mentions_dose,
-                                                         pair_feedback, split_by_card)
+from pipeline.ingest.build_orchard_training_data import (LOGBOOK_SYSTEM_ADDENDUM, TRAIN_PRODUCTS, build_card_datasets,
+                                                         build_compliance_dataset, build_logbook_dataset, compliance_extra,
+                                                         gold_card_numbers, mentions_dose, pair_feedback, split_by_card)
 
 SYS = "SYSTEM"
 
@@ -59,7 +59,7 @@ def test_sft_answer_is_grounded_cites_the_card_and_dpo_differs_in_content_only()
     data, _ = _build([rec(1)])
     sft, dpo, refl = data["sft_cards"][0], data["dpo_cards"][0], data["reflection_cards"][0]
     answer = sft["messages"][2]["content"]
-    assert "Drainage aanleggen." in answer and "Bronnen: Bank (p.1)" in answer and "kaart 1" in answer
+    assert "Drainage aanleggen." in answer and "Bronnen: Bank (p.1)." in answer and "kaart" not in answer.split("Bronnen:")[1]
     assert "c1" in sft["messages"][1]["content"]                       # the card is in the prompt context
     assert dpo["chosen"] == answer and "Niets doen." in dpo["rejected"] and "Drainage" not in dpo["rejected"]
     assert dpo["rejected"].split("Bronnen:")[1] == answer.split("Bronnen:")[1]
@@ -69,6 +69,48 @@ def test_sft_answer_is_grounded_cites_the_card_and_dpo_differs_in_content_only()
 def test_two_phrasings_per_card():
     data, _ = _build([rec(1)])
     assert len(data["sft_cards"]) == 2
+
+
+# ── compliance examples ─────────────────────────────────────────────────────────────────
+
+def _compliance(cards=None, n=60):
+    retrieve = lambda q: [{"chunk_id": "c1"}]
+    return build_compliance_dataset(retrieve, _fmt_ctx, SYS, "TOOLS", cards or {}, n=n)
+
+
+def test_compliance_answers_refer_to_ctgb_never_give_a_dose_or_an_authorisation_claim():
+    from pipeline.orchard_eval import forbidden_matches
+    rows = _compliance()
+    assert len(rows) == 60 and {r["meta"]["kind"] for r in rows} == {"compliance_dose", "compliance_auth", "compliance_select"}
+    for r in rows:
+        answer = r["messages"][2]["content"]
+        assert "ctgb" in answer.lower() and "etiket" in answer.lower() and "Bronnen:" in answer
+        assert forbidden_matches(answer, ["DOSE", "DOSE2", "CLAIM"]) == [], answer
+        assert r["messages"][1]["content"].endswith("TOOLS")           # same layout as the live prompt
+
+
+def test_compliance_training_questions_are_disjoint_from_the_eval_sets():
+    import json, re
+    from pathlib import Path
+    from pipeline.orchard_eval import normalize
+    eval_dir = Path(__file__).resolve().parent.parent / "Data" / "Orchard" / "Orchard_Eval"
+    eval_text = normalize(" ".join(json.dumps(json.loads((eval_dir / f).read_text(encoding="utf-8"))["items"], ensure_ascii=False)
+                                   for f in ("orchard_gold_qa.json", "orchard_heldout_qa.json")))
+    for product in TRAIN_PRODUCTS:
+        assert normalize(product) not in eval_text, f"{product} also occurs in an eval set"
+    eval_questions = {normalize(i["question"]) for f in ("orchard_gold_qa.json", "orchard_heldout_qa.json")
+                      for i in json.loads((eval_dir / f).read_text(encoding="utf-8"))["items"]}
+    assert not {normalize(r["meta"]["question"]) for r in _compliance()} & eval_questions
+
+
+def test_compliance_extra_adds_a_verified_dose_free_card_only():
+    card = {"title": "Kersenvlieg", "observation": "Maden in de kersen.", "action": "Vangplaten ophangen.", "sources_status": "bevestigd",
+            "steps": [], "card_no": 1, "chunk_id": "c1", "why": "", "consequence": "", "worst_case": ""}
+    hits = [{"chunk_id": "c1"}]
+    assert "Vangplaten ophangen." in compliance_extra("kersenvlieg", hits, {"c1": card})
+    assert compliance_extra("kersenvlieg", hits, {"c1": {**card, "sources_status": "nog geen bron gevonden"}}) == ""
+    assert compliance_extra("kersenvlieg", hits, {"c1": {**card, "action": "Spuit 2 l/ha."}}) == ""
+    assert compliance_extra("bacteriekanker", hits, {"c1": card}) == ""      # a card about another topic
 
 
 def test_split_by_card_keeps_a_card_on_one_side_and_is_deterministic():
