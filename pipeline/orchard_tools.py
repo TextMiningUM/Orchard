@@ -315,20 +315,24 @@ def get_rain_nowcast(lat: float, lon: float) -> RainNowcast:
     )
 
 
-# ── § 3  Ctgb toelating (gewasbeschermingsmiddelen) — STUB, NOT yet wired ───────────────
-# Hard rule (design doc Sec B.1/B.11): a medicine/dosage claim must come from a real,
-# verified source. This stub exists so the tool-dispatcher surface is complete and
-# callers/tests fail loudly and honestly instead of silently fabricating a toelating.
+# ── § 3  Ctgb toelating (gewasbeschermingsmiddelen) — via de OPEN Ctgb MST public API ──────────
+# Hard rule (design doc Sec B.1/B.11): a medicine/dosage claim must come from a real, verified
+# source. Sinds 2026-10-10 is dat de officiele Ctgb-API (geen abonnement nodig, zie G.31); de
+# oude bulk-export-URL blijft dood. Bij een storing en zonder cache gooit dit een
+# CtgbUnavailable (nooit een verzonnen status).
 def check_ctgb_toelating(middel: str, gewas: str = "kers") -> dict:
-    """STUB. Real implementation must call the Ctgb MST Public API or the daily bulk
-    Excel export (design_cherry_orchard_advisor.md Sec C.4/C.5) -- not yet wired.
-    Raises deliberately rather than inventing a toelatingsstatus."""
-    raise NotImplementedError(
-        "check_ctgb_toelating() is nog niet aangesloten op de echte Ctgb-databank "
-        "(zie design_cherry_orchard_advisor.md Sec C.5). Toon GEEN verzonnen toelatingsstatus "
-        f"voor middel={middel!r}, gewas={gewas!r} -- haal dit handmatig op bij ctgb.nl/toelatingen "
-        "totdat deze tool is aangesloten."
-    )
+    """Zoekt ``middel`` (merknaam of deel ervan) in de Ctgb-databank en geeft status + gebruiksvoorschriften voor kers terug.
+    Alleen kers wordt ondersteund. Raises ``pipeline.orchard_ctgb.CtgbUnavailable`` als de API en de cache beide ontbreken."""
+    from pipeline.orchard_ctgb import SOURCE, format_card, format_model_facts, lookup
+    if gewas.strip().lower() not in ("kers", "kersen", "zoete kers"):
+        raise ValueError(f"check_ctgb_toelating() ondersteunt alleen kers, niet {gewas!r}.")
+    lk = lookup(middel)
+    return {
+        "middel": middel, "as_of": lk.as_of.isoformat(), "source": SOURCE, "card": format_card(lk), "facts": format_model_facts(lk),
+        "products": [{"name": p.name, "registration_number": p.registration_number, "expired": p.expired,
+                      "expiration": p.expiration.isoformat() if p.expiration else None, "cherry_uses": [u.name for u in p.cherry_uses],
+                      "manual_url": p.manual_url} for p in lk.products],
+    }
 
 
 # ── § 4  Bodeminformatie (BOFEK/Bodemdata.nl) — STUB, NOT yet wired ─────────────────────

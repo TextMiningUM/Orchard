@@ -128,6 +128,72 @@ def _anchor(year: int, ref: date) -> date:
         return date(year, ref.month, 28)
 
 
+def history_years_of(entries: list[LogEntry], ref_year: int) -> tuple[int, ...]:
+    """Jaren vóór ``ref_year`` met genoeg logboekregels om als "jaar met logboek" te tellen."""
+    per_year = Counter(e.date.year for e in entries if e.date is not None)
+    return tuple(sorted(y for y, n in per_year.items() if y < ref_year and n >= MIN_ENTRIES_PER_YEAR))
+
+
+@dataclass(frozen=True)
+class ProductHistory:
+    """Het eigen gebruik van één middel (of middelfamilie, bv. 'Epso' en 'Epso Microtop') uit het logboek."""
+    query: str
+    names: tuple[str, ...]
+    category: str
+    applications: int
+    per_year: tuple[tuple[int, int], ...]
+    months: tuple[tuple[int, int], ...]
+    first: date
+    last: date
+    dates: tuple[date, ...]
+    gaps_days: tuple[int, ...]                 # tussen opeenvolgende toepassingen binnen hetzelfde jaar
+    purposes: tuple[tuple[str, int], ...]
+    covered_years: int
+    near_ref_years: int                        # jaren met een toepassing binnen ±15 dagen van de referentiedatum
+
+
+def product_history(entries: list[LogEntry], query: str, ref: date | None = None) -> ProductHistory | None:
+    q = (query or "").strip()
+    if not q:
+        return None
+    ref = ref or date.today()
+    from pipeline.orchard_logbook_rag import fold
+    q1 = fold(q).split()[0]
+    dates: list[date] = []
+    names: Counter = Counter()
+    cats: Counter = Counter()
+    purposes: dict[str, set[int]] = defaultdict(set)
+    for e in entries:
+        if e.date is None:
+            continue
+        hit = False
+        for raw, _h in e.toepassingen:
+            name, cat = canonicalize_middel(raw)
+            fn = fold(name)
+            if len(fn) >= 3 and (fn == q1 or fn.startswith(q1) or q1.startswith(fn)):
+                names[name] += 1
+                cats[cat] += 1
+                dates.append(e.date)
+                hit = True
+        if hit:
+            for p in purposes_of(e.opmerkingen):
+                purposes[p].add(e.date.year)
+    if not dates:
+        return None
+    dates.sort()
+    by_year: dict[int, list[date]] = defaultdict(list)
+    for d in dates:
+        by_year[d.year].append(d)
+    gaps = tuple((b - a).days for ds in by_year.values() for a, b in zip(ds, ds[1:]) if (b - a).days > 0)
+    covered = history_years_of(entries, ref.year)
+    near = sum(1 for y in covered if any(abs((d - _anchor(y, ref)).days) <= 15 for d in by_year.get(y, [])))
+    top = sorted(((p, len(ys)) for p, ys in purposes.items()), key=lambda t: (-t[1], t[0]))[:3]
+    return ProductHistory(
+        query=q, names=tuple(n for n, _ in names.most_common()), category=cats.most_common(1)[0][0], applications=len(dates),
+        per_year=tuple(sorted((y, len(ds)) for y, ds in by_year.items())), months=tuple(sorted(Counter(d.month for d in dates).items())),
+        first=dates[0], last=dates[-1], dates=tuple(dates), gaps_days=gaps, purposes=tuple(top), covered_years=len(covered), near_ref_years=near)
+
+
 def build_calendar(entries: list[LogEntry], ref: date, window_days: int = DEFAULT_WINDOW_DAYS, *, removed_duplicates: int = 0,
                    verified: int = 0, total: int = 0) -> CalendarReport:
     dated = [e for e in entries if e.date is not None]
@@ -233,5 +299,5 @@ def calendar_facts(arg: str | None, db_path: Path | None = None, today: date | N
                                           verified=data.verified, total=data.total))
 
 
-__all__ = ["CalendarData", "CalendarReport", "ProductWindow", "build_calendar", "calendar_facts", "dedupe_entries", "format_calendar",
-           "load_calendar_data", "parse_calendar_arg", "purposes_of"]
+__all__ = ["CalendarData", "CalendarReport", "ProductHistory", "ProductWindow", "build_calendar", "calendar_facts", "dedupe_entries", "format_calendar",
+           "history_years_of", "load_calendar_data", "parse_calendar_arg", "product_history", "purposes_of"]

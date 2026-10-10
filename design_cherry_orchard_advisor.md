@@ -101,6 +101,7 @@ Bronnen voor dit ontwerp:
   - [G.28 Meetbetrouwbaarheid, held-out set, reward, rejection sampling en SFT-rondes (2026-10-10)](#sec-g28)
   - [G.29 Waterbalans: dag-tot-dag delta neerslag minus verdamping, te droog of te nat (2026-10-10)](#sec-g29)
   - [G.30 Logboek-kalender: "wat deed ik rond deze tijd?" en wat het logboek over de nazorg zegt (2026-10-10)](#sec-g30)
+  - [G.31 Middel opzoeken: Ctgb-voorschrift (open API) + eigen logboek + agentic tool, multi-hop-ontwerp (2026-10-10)](#sec-g31)
 - [Deel H — Aanbevelingen voor de teler: wat meten en vastleggen vanaf 2027](#deel-h) *(los te lezen; bedoeld om aan de teler te geven)*
   - [H.0 Waarom dit nodig is](#sec-h0) · [H.1 Vijf spelregels](#sec-h1) · [H.2 De korte lijst (begin hier)](#sec-h2) · [H.3 Volledig overzicht per onderwerp](#sec-h3)
   - [H.4 Camera's](#sec-h4) · [H.5 Jaarkalender 2027](#sec-h5) · [H.6 Wat de adviseur met elke meting doet](#sec-h6) · [H.7 Starterspakket](#sec-h7) · [H.8 Wat wij bouwen om dit te ontvangen](#sec-h8)
@@ -536,7 +537,8 @@ Hergebruik van het masterproject-document se eigen evaluatieplan, geconcretiseer
 
 - **Harde tool-verificatieplicht**: een advies dat een middelnaam + dosering bevat mag nooit getoond
   worden zonder een succesvolle `check_ctgb_toelating()`-call in dezelfde beurt (analoog aan Captain's
-  "never exceed the Chief-Engineer-declared safe speed"-shield).
+  "never exceed the Chief-Engineer-declared safe speed"-shield). **Sinds 2026-10-10 bestaat die call echt** (open Ctgb-API, zie [G.31](#sec-g31)):
+  de doseringen komen letterlijk als kaart van de API naar de gebruiker en passeren het taalmodel niet.
   - Als dit niet mogelijk is of de tool geeft een onzekere/oude status terug: de agent moet dit expliciet melden, niet negeren.
 - **Bestuiver-shield**: tijdens de bloeifase wordt elk voorstel automatisch getoetst tegen een
   bijenveiligheids-vlag.
@@ -620,11 +622,10 @@ in [G.12](#sec-g12).
 <a id="sec-c5"></a>
 ## C.5 Juridische/regelgeving-bronnen
 
-**Implementatiestatus (2026-10-09)**: geen van deze bronnen is operationeel aangesloten als live tool
-— `check_ctgb_toelating()` is een bewuste `NotImplementedError`-stub (zie [B.11](#sec-b11): nooit een
-verzonnen toelatingsstatus). Bij navraag (2026-10-08) bleek de veelgeciteerde Ctgb-bulk-export-URL
-hieronder **dood** (DNS-fout) en `toelatingen.ctgb.nl` zelf een 403'd JS-vereiste SPA — dit blijft een
-open gat. EUR-Lex is wél bevraagd voor Reg. 2018/848 ([C.1](#sec-c1)), maar leverde onbedoeld
+**Implementatiestatus (bijgewerkt 2026-10-10)**: de **Ctgb-toelatingen zijn nu wél live aangesloten** via de open Ctgb MST public API
+(`public.mst.ctgb.nl`, geen abonnement of sleutel nodig; zie [G.31](#sec-g31)) — `check_ctgb_toelating()` is geen stub meer. De oude
+Ctgb-bulk-export-URL hieronder blijft **dood** (DNS-fout, 2026-10-08 en 2026-10-10 bevestigd). De overige bronnen zijn niet als live tool
+aangesloten. EUR-Lex is wél bevraagd voor Reg. 2018/848 ([C.1](#sec-c1)), maar leverde onbedoeld
 Engelstalige tekst op (content-negotiation-probleem, zie [Deel F](#deel-f) punt 8) en is daarom nog
 niet in de kennisbank opgenomen.
 
@@ -687,8 +688,8 @@ wel gebruiken, maar we moeten het eerst vertalen naar NL voor we het omzetten na
   Dit blijft de belangrijkste blokkerende data-leemte voor een toekomstige DPO-trainingsronde die
   daadwerkelijk op opbrengst optimaliseert in plaats van op "lijkt op wat de teler deed".
   **Wat de teler vanaf 2027 kan vastleggen om dit te dichten: zie [Deel H](#deel-h)** (oogstregistratie, bodem/blad, sensoren, vallen, camera's).
-- **Ctgb-toelatingsdata**: bulk-export-URL bleek dood (zie [C.5](#sec-c5)) — blijft een open gat,
-  `check_ctgb_toelating()` is en blijft een expliciete stub.
+- **Ctgb-toelatingsdata**: de bulk-export-URL is dood (zie [C.5](#sec-c5)), maar de **open Ctgb MST public API** werkt wel
+  en is sinds 2026-10-10 aangesloten (`check_ctgb_toelating()`, [G.31](#sec-g31)). Open: de gebruiksaanwijzing-PDF's zelf worden nog niet geparsed (alleen gelinkt).
 - **Bodem-pH/zuurgraad**: nog steeds geen echte koppeling (zie [C.4](#sec-c4)) — concreet gemist bij
   de bouw van Patroonherkenning's seizoenswaarschuwingen ([G.8](#sec-g8)), waar "te zure grond" als
   voorbeeld werd genoemd maar NIET gesignaleerd kon worden; `soil_ph_status_note()` toont in de UI
@@ -2296,6 +2297,56 @@ Tests: 377 groen (nieuw: 15 voor de kalender, dubbele regels, jaar-met-logboek, 
 
 ---
 
+<a id="sec-g31"></a>
+## G.31 Middel opzoeken: Ctgb-voorschrift (open API) + eigen logboek + agentic tool, multi-hop-ontwerp (2026-10-10)
+
+**Vraag (teler)**: kunnen we een agentic tool maken waarmee de juiste dosering en toepassingsfrequentie worden opgezocht in de Ctgb-databank en op het etiket — of heb je daarvoor een abonnement nodig? En kan het een opzoektool zijn vanuit de eigen omgeving: welk merk heb je, en wat zou je volgens je logboeken en eerdere ervaring moeten doen? Ook een pagina/knop (bij Middelen), en een tool die we later in het multi-hop-redeneren kunnen meenemen.
+
+**Antwoord: nee, geen abonnement nodig.** Het Ctgb biedt een **open API** (MST public API, `https://public.mst.ctgb.nl/public-api/1.0/`, JSON:API, geen sleutel; de Toelatingendatabank zelf gebruikt dezelfde API; het Ctgb geeft er geen ondersteuning op) en de data zijn open (CC-0 op data.overheid.nl).
+De oude bulk-export (`ctgb.blob.core.windows.net/...xls`) is wel dood (opnieuw bevestigd), maar dat is niet meer nodig. Gecontroleerd met echte antwoorden voor Syllit, Movento, Switch, Signum, Pirimor, Calypso, Thiovit, Folicur en Rovral.
+
+**Wat de API per gebruik (per gewas) levert** (`/authorisations?filter[productName]=…`, dan `/authorisations/{id}`): maximale dosis (`maximumProductDose`, bv. 1,25 L/ha of 0,75 kg/ha), aantal toepassingen (`perCropSeason` en/of `perUse`), minimaal interval in dagen,
+veiligheidstermijn (`phiDays`), periode (maanden), groeistadium (BBCH), watervolume, doelorganismen (met EPPO-codes), teeltomstandigheden, opmerkingen en beperkingen in vrije tekst, en de links naar de **officiële gebruiksaanwijzing en het toelatingsbesluit** (PDF). Ook werkzame stof(fen) met gehalte, toelatinghouder, geldigheid.
+
+**Ontwerpkeuze: twee kanalen** (deterministische kern eerst, [B.1](#sec-b1)/[B.11](#sec-b11)):
+| Kanaal | Voor wie | Inhoud |
+|---|---|---|
+| **Kaart** (`ToolResult.card` → `AdvisorResponse.cards`, `format_card`) | de teler, door de app getoond (uitklapper "Officiële gegevens (letterlijk uit de bron, niet door het model geschreven)") | de getallen **letterlijk** uit de API, met links naar de PDF's en de disclaimer "wettelijk maximum, geen spuitadvies; gebruiksaanwijzing/etiket is leidend" |
+| **Facts** (`format_model_facts`) | het taalmodel | alleen status ("geldige/verlopen toelating", "voorschrift voor kers aanwezig") en de opdracht om naar de kaart te verwijzen; **geen doseringen of limieten** |
+Zo kan het model nooit een dosis "verbeteren" of verzinnen, blijft de SFT-/eval-houding (nooit een dosis noemen; `DOSE`/`CLAIM`-guards in `orchard_eval`/`orchard_reward`) geldig en is toch elke getoonde waarde herleidbaar tot de bron. De beschrijving van `ctgb_toelating` in de toolcatalogus is **ongewijzigd**, dus de bestaande SFT-prompts blijven kloppen.
+
+**Gebouwd**
+- `pipeline/orchard_ctgb.py`: client met schijf-cache (7 dagen, `Data/Orchard/Ctgb/`, gitignored), terugval op oudere cache met melding bij storing, `CtgbUnavailable` zonder cache (nooit een verzonnen status); parser (`CtgbUse`/`CtgbProduct`); `lookup(naam)` (geldige toelatingen eerst; verlopen toelatingen alleen als ze een kers-voorschrift hebben, de rest wordt geteld
+  en genoemd); `format_card`, `format_model_facts`, `use_rows` (tabel), `detect_product_names`. Details die de echte data afdwong: kers-gebruik = hele gewasnamen (**"Tuinkers" is geen kers**); "Boomkwekerijgewassen" bevat ook kers maar is kwekerijgebruik, dus alleen expliciet *Kers* of de groepen *Vruchtbomen*/*Steenvruchten*;
+  Ctgb-datums zijn middernacht Nederlandse tijd als UTC (22:00Z/23:00Z) en worden op de Nederlandse dag afgerond; `perUse` en `perCropSeason` worden allebei letterlijk getoond met hun eigen label.
+- `pipeline/orchard_middel_lookup.py`: **`middel_opzoeken(logboek, merknaam)`** combineert (1) het Ctgb-voorschrift, (2) het eigen gebruik uit het logboek (`product_history`: aantal, per jaar, maanden, interval, doel, laatst gebruikt, "rond deze tijd in X van Y jaar") en (3) een **praktijkcontrole** tegen de ruimhartigste limiet van de geldige kers-voorschriften
+  (aantal per seizoen, interval, toegestane maanden; alleen vergelijken als alle limieten bekend zijn, geen beschuldiging bij een ruimere tweede gebruiksvoorschrift). De waarschuwing heeft twee teksten: met getallen voor de kaart, **zonder getallen voor het model**. Bij een verlopen middel staat er expliciet waarom er niet vergeleken is.
+- **Tools**: `ctgb_toelating(merknaam)` is nu echt (kaart + status); `middel_opzoeken(merknaam)` (alleen waar het logboek lokaal aan staat, `ORCHARD_LOGBOOK_RAG=1`, dus niet op de publieke pod) geeft kaart + eigen gebruik + praktijkcontrole. `check_ctgb_toelating()` in `orchard_tools` retourneert nu een gestructureerd antwoord.
+- **Chat** ("Vraag de Adviseur"): middel-/dosering-/toelatingsvragen met een herkenbare merknaam tonen direct de officiële kaart (deterministisch, zonder het model); zonder merknaam vraagt de app om de merknaam (guardrail blijft); bij storing geen getallen.
+- **Pagina** *Gebruik van Middelen → Middel opzoeken* (`app/ctgb_lookup_view.py`): kies een middel uit je logboek (alleen gewasbeschermingsmiddelen; meststoffen vallen niet onder het Ctgb) of typ een merknaam, knop "Zoek op": tabel per product en gebruik, volledige kaart in een uitklapper, je eigen gebruik (metrics, grafiek per jaar, doel) en de praktijkwaarschuwing.
+
+**Echte bevindingen op jouw logboek** (peildatum 10 oktober 2026; indicatief, zie de voorbehouden hieronder):
+- **Syllit** (35 toepassingen, 2013–2023): in 8 van de 11 jaren staan 3–5 toepassingen in het logboek, terwijl het huidige kers-voorschrift (Syllit 544 SC en Syllit Flow 400 SC) maximaal 2 per teeltseizoen toestaat; de logboek-intervallen (~12 dagen) liggen ook ver onder het minimale interval van het voorschrift. Waarschuwing met voorbehoud: een regel kan een deelbehandeling of ander perceel zijn en de voorschriften waren vroeger mogelijk anders.
+- **Movento** (11 toepassingen, tot 2022): de toelating onder die naam, met het voorschrift voor kers (zwarte kersenluis), is **verlopen op 30 april 2024**; er is onder de naam "Movento" geen geldig kers-voorschrift meer (er kan een opgebruiktermijn hebben gegolden; een opvolger onder een andere naam is hier niet nagegaan). **Calypso** (laatst gebruikt april 2020) is in 2020 verlopen.
+- **Signum**: geldig voor kers, geen afwijking van het voorschrift gevonden in het logboek.
+
+**Multi-hop-ontwerp (volgende stap, nog niet gebouwd)**: de tools zijn zo gebouwd dat ze als stappen in een keten passen (`ToolResult = facts + sources + card`; elke stap is deterministisch, getest en citeerbaar):
+1. *Situatie*: `waterbalans`, weer/vorst/Suzuki-risico, fenofase, `logboek_kalender` (wat deed je rond nu?).
+2. *Probleem*: kennisbank (probleemkaarten, OAC) of de teler benoemt het (bv. bladvlekkenziekte).
+3. *Kandidaten*: eigen historie (welke middelen gebruikte je tegen dit doel) → `middel_opzoeken` per kandidaat.
+4. *Poort (deterministisch)*: geldige toelating, kers-voorschrift aanwezig, **toegestane maand en BBCH nu**, interval t.o.v. je laatste toepassing in het logboek, aantal toepassingen dit seizoen versus het maximum, **veiligheidstermijn tegen de verwachte oogstdatum**, bestuivers-/bloeifase ([B.11](#sec-b11)). Alleen kandidaten die de poort passeren worden getoond, elk met kaart.
+5. *Uitleg*: het taalmodel verwoordt keuzes en afwegingen (waarom nu, wat is het alternatief) zonder getallen te noemen.
+Uitbreidingen die de API al toelaat: werkzame stof per toepassing bijhouden voor **resistentiemanagement** (zelfde stof meerdere keren per seizoen), alternatieve middelen met hetzelfde doel (`filter[pppTargetOrganisms]`, `filter[pppTargetCrops]`), bijenindicatie per gewas (`attractiveToHoneybees`). **Compliance-poort (aanbevolen)**: elk antwoord dat een middelnaam noemt moet in dezelfde beurt een `ctgb_toelating`/`middel_opzoeken`-aanroep hebben (anders disclaimer), zoals [B.11](#sec-b11) al eiste.
+
+**Beperkingen / eerlijk**: (1) de API is niet door het Ctgb ondersteund en kan wijzigen; de cache en de storingsmelding vangen dat op, de parser is gecontroleerd tegen echte antwoorden maar niet tegen alle ~1000 toelatingen. (2) Gebruiksaanwijzingen en besluiten worden alleen **gelinkt**, niet geparsed (vrije tekst met o.a. bijenregels en mengadviezen staat daar); een label-corpus voor de RAG is een logische vervolgstap.
+(3) Het watervolume heeft in de API geen vermelde eenheid; de kaart zegt dat. (4) Verlopen toelatingen kunnen een opgebruik-/afleveringstermijn hebben; de kaart wijst naar het besluit. (5) De praktijkcontrole vergelijkt met de huidige voorschriften en telt kalenderjaren als teeltseizoen.
+(6) **Eval**: het gedrag van `ctgb_toelating` is veranderd (echte status in plaats van altijd een guardrail-tekst). Gecontroleerd met `sft_v2` op de guardrail-vragen (gouden + held-out, 20 vragen) na de wijziging: **19/20 geslaagd, 0 doseringen genoemd**; de ene afwijking (gh02) is de al bekende `CLAIM`-vals-positief
+(het model weigert, maar schrijft "toegelaten" in de zin, zie [G.28](#sec-g28)). Aanvullend horen er merknaam-vragen bij die via de kaart beantwoord worden en een herhaling met meer runs.
+Dit is geen spuitadvies: de app toont wat Ctgb toestaat en wat jij deed; de keuze en de verantwoordelijkheid blijven bij de teler.
+Tests: 411 groen (nieuw: 16 voor client/parser/cache/kaart, 17 voor de combinatie, tools, agent-kaartstroom en pagina-sectie, 2 voor de chatroute; alles met een nep-API in dezelfde vorm als de echte antwoorden, zonder netwerk).
+
+---
+
 <a id="deel-h"></a>
 # Deel H — Aanbevelingen voor de teler: wat meten en vastleggen vanaf 2027
 
@@ -2428,6 +2479,7 @@ opbrengst en kwaliteit werkt, ontbreken vier dingen: **uitkomsten** (kilo's, kla
 ## H.8 Wat wij bouwen om dit te ontvangen (nog niet gebouwd)
 
 - **Invoerpagina's** in de app (lokaal): oogstregistratie, scouting/valtelling, schadescore, spuit- en bemestingsregistratie met "werkte het?", seizoensevaluatie; elk met datum + perceel/rij, validatie van eenheden en een export naar CSV.
+  De spuitregistratie koppelt aan de Ctgb-opzoektool ([G.31](#sec-g31)): bij het kiezen van een middel verschijnen limieten (aantal, interval, veiligheidstermijn, periode) en wordt de invoer er direct tegen getoetst.
 - **Import van sensor- en loggerbestanden** (CSV) met controle op gaten en onmogelijke waarden, en weergave naast de waterbalans en het vorstrisico.
 - **Foto-opslag lokaal** met een eenvoudig overzicht per camera en dag, en een invoerveld voor de handmatige BBCH-waarheid.
 - **Kalibratie** zodra er een seizoen met uitkomsten is: Kc, wortelzone en drempels van de waterbalans, graaddagen voor bloei en oogst, en het Suzuki-/barstrisico, elk met een eerlijke vergelijking van voor en na.

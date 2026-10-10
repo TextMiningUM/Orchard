@@ -100,6 +100,7 @@ class AdvisorResponse:
     tool_calls: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
     grounding: str = "red"  # "green" | "red" -- see assess_grounding()
+    cards: list[str] = field(default_factory=list)  # tool-made markdown shown verbatim to the user (e.g. the Ctgb dose card)
 
 
 def _strip_think(text: str) -> tuple[str, str]:
@@ -315,6 +316,7 @@ def ask_orchard_advisor(
 
     reasoning_parts: list[str] = []
     tool_calls_made: list[str] = []
+    cards: list[str] = []
     budget = max_new_tokens
 
     for _hop in range(max_tool_hops + 1):
@@ -349,6 +351,7 @@ def ask_orchard_advisor(
                 tool_calls=tool_calls_made,
                 sources=deduped_sources,
                 grounding=assess_grounding(final_answer, deduped_sources, tool_calls_made),
+                cards=_dedup(cards),
             )
 
         name = tool_call.get("call_tool")
@@ -362,6 +365,8 @@ def ask_orchard_advisor(
         result = tool.fn(arg if isinstance(arg, str) else None)
         tool_calls_made.append(name)
         sources.extend(result.sources)
+        if result.card:
+            cards.append(result.card)
         messages.append({"role": "user", "content": f"Tool-resultaat ({name}):\n{result.facts}\n\nGeef nu je antwoord, of roep nog een tool aan."})
         budget = max(_POST_TOOL_MIN_TOKENS, max_new_tokens // 2)
 
@@ -379,6 +384,7 @@ def ask_orchard_advisor(
         tool_calls=tool_calls_made,
         sources=deduped_sources,
         grounding=assess_grounding(final_answer, deduped_sources, tool_calls_made),
+        cards=_dedup(cards),
     )
 
 
@@ -455,6 +461,7 @@ def ask_orchard_advisor_stream(
             question, ctx, snapshot, rag_index, max_tool_hops, history, max_history_turns)
         reasoning_parts: list[str] = []
         tool_calls_made: list[str] = []
+        cards: list[str] = []
         budget = max_new_tokens
 
         for _hop in range(max_tool_hops + 1):
@@ -489,6 +496,7 @@ def ask_orchard_advisor_stream(
                     tool_calls=tool_calls_made,
                     sources=deduped_sources,
                     grounding=assess_grounding(final_answer, deduped_sources, tool_calls_made),
+                    cards=_dedup(cards),
                 )
                 return
 
@@ -503,6 +511,8 @@ def ask_orchard_advisor_stream(
             result = tool.fn(arg if isinstance(arg, str) else None)
             tool_calls_made.append(name)
             sources.extend(result.sources)
+            if result.card:
+                cards.append(result.card)
             messages.append({"role": "user", "content": f"Tool-resultaat ({name}):\n{result.facts}\n\nGeef nu je antwoord, of roep nog een tool aan."})
             budget = max(_POST_TOOL_MIN_TOKENS, max_new_tokens // 2)
 
@@ -526,6 +536,7 @@ def ask_orchard_advisor_stream(
             tool_calls=tool_calls_made,
             sources=deduped_sources,
             grounding=assess_grounding(final_answer, deduped_sources, tool_calls_made),
+            cards=_dedup(cards),
         )
 
     return StreamingAdvisorAnswer(_run)

@@ -101,6 +101,11 @@ class AgentPaths:
         return self.data_root / "OrchardLogbooks"
 
     @property
+    def ctgb_dir(self) -> Path:
+        """Disk cache of Ctgb MST public API responses (public data, but a cache -> gitignored)."""
+        return self.data_root / "Ctgb"
+
+    @property
     def eval_dir(self) -> Path:
         """Held-out evaluation material. NEVER goes into training."""
         return self.data_root / f"{self.domain}_Eval"

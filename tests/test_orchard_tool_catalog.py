@@ -83,7 +83,12 @@ def test_waterbalans_tool_says_so_when_weather_is_unreachable(monkeypatch):
     assert "niet te berekenen" in result.facts and "Geef geen getallen" in result.facts
 
 
-def test_ctgb_toelating_tool_always_returns_guardrail_text():
+def test_ctgb_toelating_tool_returns_guardrail_text_and_never_invents_status(monkeypatch):
+    from pipeline import orchard_ctgb
+
+    def down(*a, **k):
+        raise orchard_ctgb.CtgbUnavailable("offline")
+    monkeypatch.setattr(orchard_ctgb, "lookup", down)
     catalog = build_tool_catalog(_FakeCtx(), snapshot=None, rag_index=None)
     result = catalog["ctgb_toelating"].fn("Decis")
     assert "GUARDRAIL" in result.facts

@@ -24,6 +24,7 @@ from pipeline.orchard_rag import RagIndex, format_context, format_sources, retri
 class ToolResult:
     facts: str
     sources: list[str] = field(default_factory=list)
+    card: str = ""   # markdown shown to the user VERBATIM by the app (e.g. the Ctgb dose card); never passed through the model
 
 
 @dataclass
@@ -98,12 +99,29 @@ def _vruchtbarsten_risico(_arg: str | None, ctx, snapshot: dict) -> ToolResult:
 
 
 def _ctgb_toelating(arg: str | None) -> ToolResult:
-    from pipeline.orchard_tools import check_ctgb_toelating
+    """Echte Ctgb-lookup (ontwerp G.31). Het model krijgt status + verwijzing zonder doseringen; de voorschriftkaart met de letterlijke getallen gaat
+    via ``card`` rechtstreeks naar de gebruiker."""
+    from pipeline.orchard_ctgb import SOURCE, CtgbUnavailable, format_card, format_model_facts, lookup
+    name = (arg or "").strip()
+    if not name:
+        return ToolResult(facts="COMPLIANCE-GUARDRAIL: geen middelnaam meegegeven aan ctgb_toelating; vraag de teler om de merknaam van het middel.")
     try:
-        check_ctgb_toelating(middel=arg or "onbekend", gewas="kers")
-    except NotImplementedError as exc:
-        return ToolResult(facts=f"COMPLIANCE-GUARDRAIL: {exc}")
-    return ToolResult(facts="Onverwacht: geen guardrail getriggerd.")  # pragma: no cover -- always raises today
+        lk = lookup(name)
+    except CtgbUnavailable as exc:
+        return ToolResult(facts=f"COMPLIANCE-GUARDRAIL: de Ctgb-databank is nu niet te bereiken ({exc}). Doe geen uitspraak over toelating of dosering "
+                                f"van {name!r}; verwijs naar ctgb.nl en het etiket.")
+    return ToolResult(facts=format_model_facts(lk), sources=[SOURCE], card=format_card(lk))
+
+
+def _middel_opzoeken(arg: str | None) -> ToolResult:
+    from pipeline.orchard_ctgb import SOURCE
+    from pipeline.orchard_logbook_calendar import load_calendar_data
+    from pipeline.orchard_middel_lookup import format_facts, format_full_card, middel_opzoeken
+    name = (arg or "").strip()
+    if not name:
+        return ToolResult(facts="Geen merknaam meegegeven aan middel_opzoeken.")
+    advies = middel_opzoeken(load_calendar_data().entries, name)
+    return ToolResult(facts=format_facts(advies), sources=[SOURCE, "Eigen logboek 2013-heden (niet geverifieerd)"], card=format_full_card(advies))
 
 
 def _kennisbank_zoeken(arg: str | None, rag_index: RagIndex | None) -> ToolResult:
@@ -179,6 +197,15 @@ def build_tool_catalog(ctx, snapshot: dict | None, rag_index: RagIndex | None) -
                              "Citeer alleen wat er staat; de transcripties zijn nog niet allemaal geverifieerd.",
                 arg_hint="een korte zoekvraag met jaar/maand/datum en/of middel, bijv. 'Syllit 2019' of 'mei 2014'",
                 fn=lambda arg: _logboek_zoeken(arg, logbook_index),
+            )
+            catalog["middel_opzoeken"] = BoundTool(
+                name="middel_opzoeken",
+                description="Zoek een middel op merknaam op: toelatingsstatus en gebruiksvoorschrift voor kers uit de Ctgb-databank (de dosering "
+                             "verschijnt als kaart onder je antwoord, noem hem zelf niet) PLUS wat de teler er zelf mee deed volgens het eigen "
+                             "logboek (hoe vaak, wanneer, doel) en waar dat afwijkt van het voorschrift. Gebruik dit voor 'welk middel heb ik/wat "
+                             "moet ik met X', ook als vervolg op logboek_kalender.",
+                arg_hint="de merknaam, bijv. 'Syllit'",
+                fn=_middel_opzoeken,
             )
             catalog["logboek_kalender"] = BoundTool(
                 name="logboek_kalender",

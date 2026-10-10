@@ -124,10 +124,10 @@ SOURCES: list[SourceSpec] = [
         note="GECONTROLEERD 2026-10-08: de veelgeciteerde URL "
              "ctgb.blob.core.windows.net/documents/public-authorisations-report.xls "
              "resolvet niet meer (DNS-fout, bevestigd vanaf zowel lokale machine als los "
-             "fetch-mechanisme) -- kennelijk verouderd/verplaatst. toelatingen.ctgb.nl zelf "
-             "weigert scripted toegang (403, waarschijnlijk JS-vereiste SPA). Blijft een "
-             "open gat; pipeline.orchard_tools.check_ctgb_toelating() blijft daarom een "
-             "expliciete NotImplementedError-stub (nooit een verzonnen toelatingsstatus).",
+             "fetch-mechanisme) -- kennelijk verouderd/verplaatst; blijft dood (opnieuw bevestigd "
+             "2026-10-10). OPGELOST via een andere route: de open Ctgb MST public API "
+             "(public.mst.ctgb.nl, geen sleutel nodig) is sinds 2026-10-10 aangesloten in "
+             "pipeline/orchard_ctgb.py en pipeline.orchard_tools.check_ctgb_toelating() (ontwerp G.31).",
     ),
     SourceSpec(
         id="actua_steenfruit_archief",

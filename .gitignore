@@ -61,6 +61,8 @@ Docs/
 Data/Orchard/Orchard_Agents_Training/
 Data/Orchard/Orchard_JSON/
 
+# Cache of Ctgb MST public API responses (regenerable, fetched on demand)
+Data/Orchard/Ctgb/
 # Scratch output of pipeline/run_orchard_eval.py (the gold set itself IS tracked)
 Data/Orchard/Orchard_Eval/_runs/
 

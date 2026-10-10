@@ -12,7 +12,7 @@ from pipeline.orchard_logbook_calendar import (CAVEAT, DEFAULT_WINDOW_DAYS, buil
 
 
 @st.cache_data(show_spinner=False)
-def _cached_data(db_path: str, mtime: float):
+def cached_calendar_data(db_path: str, mtime: float):
     return load_calendar_data(Path(db_path))
 
 
@@ -24,7 +24,7 @@ def render_logbook_calendar(db_path: Path, today: date | None = None) -> None:
     c1, c2 = st.columns([1, 2])
     ref = c1.date_input("Rond datum", value=today, key="lbcal_date", format="YYYY-MM-DD")
     window = c2.slider("Venster (± dagen)", 7, 30, DEFAULT_WINDOW_DAYS, 1, key="lbcal_window")
-    data = _cached_data(str(db_path), Path(db_path).stat().st_mtime)
+    data = cached_calendar_data(str(db_path), Path(db_path).stat().st_mtime)
     rep = build_calendar(data.entries, ref, window, removed_duplicates=data.removed_duplicates, verified=data.verified, total=data.total)
     nh = len(rep.history_years)
     if nh == 0:

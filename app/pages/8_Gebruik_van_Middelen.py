@@ -30,7 +30,8 @@ from pipeline.orchard_middelen import (  # noqa: E402
     build_toepassing_records,
 )
 from pipeline.orchard_logbook_calendar import load_calendar_data  # noqa: E402
-from logbook_calendar_view import render_logbook_calendar  # noqa: E402
+from logbook_calendar_view import cached_calendar_data, render_logbook_calendar  # noqa: E402
+from ctgb_lookup_view import render_ctgb_lookup  # noqa: E402
 
 st.set_page_config(page_title="Gebruik van Middelen", layout="wide")
 st.title("Gebruik van Middelen")
@@ -97,6 +98,8 @@ for r in records:
     entry_ids_by_middel.setdefault(r.canonical_middel, []).append(r.entry_id)
 
 render_logbook_calendar(DB_PATH)
+st.divider()
+render_ctgb_lookup(cached_calendar_data(str(DB_PATH), DB_PATH.stat().st_mtime).entries)
 st.divider()
 
 col_a, col_b = st.columns([1, 3])

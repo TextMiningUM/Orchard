@@ -46,7 +46,7 @@ from pipeline.orchard_chats import (  # noqa: E402
 )
 from pipeline.orchard_feedback import build_feedback_record, save_feedback  # noqa: E402
 from pipeline.orchard_rag import load_index  # noqa: E402
-from pipeline.orchard_tools import check_ctgb_toelating, get_rain_nowcast  # noqa: E402
+from pipeline.orchard_tools import get_rain_nowcast  # noqa: E402
 from pipeline.qwen_remote import (round_up_s, get_status, is_remote_server_up, model_state, reconnect_tunnel,  # noqa: E402
                                   wait_notice)
 from datetime import datetime, timezone  # noqa: E402
@@ -168,14 +168,7 @@ def _try_deterministic_route(question: str) -> dict | None:
         return _plain(f"Kon geen live weerdata ophalen: {exc}", grounding="red")
 
     if any(k in q for k in ("middel", "dosering", "toegelaten", "ctgb", "spuiten met")):
-        try:
-            check_ctgb_toelating(middel="onbekend", gewas="kers")
-        except NotImplementedError as exc:
-            return _plain(
-                "**Compliance-guardrail**: ik kan en mag geen middelnaam/dosering verzinnen. "
-                f"{exc}\n\nRaadpleeg handmatig ctgb.nl/toelatingen totdat deze tool is aangesloten "
-                "(zie ontwerp Sec C.5)."
-            )
+        return _ctgb_route(question)
 
     if any(k in q for k in ("vorst", "nachtvorst", "koud vannacht")):
         risky = [f for d, f in snap["frost_by_day"] if f.risk in ("hoog", "kritiek")]
@@ -220,6 +213,29 @@ def _try_deterministic_route(question: str) -> dict | None:
     return None
 
 
+def _ctgb_route(question: str) -> dict:
+    """Middel-/dosering-/toelatingsvragen: de officiele Ctgb-kaart (letterlijk uit de API, nooit door het model geschreven). Zonder herkenbare
+    merknaam blijft het bij de compliance-guardrail met de vraag om de merknaam."""
+    from pipeline.orchard_ctgb import SOURCE, CtgbUnavailable, detect_product_names, fold, format_card, lookup
+    from pipeline.orchard_middelen import _ALIAS_INDEX
+    names = detect_product_names(question, {fold(k) for k in _ALIAS_INDEX})
+    if not names:
+        return _plain(
+            "**Compliance-guardrail**: ik noem geen dosering of toelatingsstatus uit mijn hoofd. Noem de **merknaam** van het middel (bijv. 'Syllit') en ik "
+            "toon het officiële Ctgb-voorschrift voor kers (dosering, aantal toepassingen, interval, veiligheidstermijn), of zoek het op via "
+            "*Gebruik van Middelen → Middel opzoeken*. Controleer altijd ook de gebruiksaanwijzing/het etiket."
+        )
+    try:
+        lookups = [lookup(name) for name in names]
+    except CtgbUnavailable as exc:
+        return _plain(f"De Ctgb-databank is nu niet te bereiken ({exc}). Ik toon geen dosering of toelatingsstatus zonder die bron; probeer het later nog "
+                      "eens of kijk op ctgb.nl.", grounding="red")
+    shown = [lk for lk in lookups if lk.products] or lookups[:1]   # a second capitalised word (a disease) must not add an empty card
+    return {"answer": "Hieronder staat het **officiële Ctgb-voorschrift voor kers** voor " + " en ".join(f"'{lk.query}'" for lk in shown) + ", letterlijk uit de "
+            "Ctgb-databank (niet door het taalmodel geschreven). Dit is het wettelijke maximum en geen spuitadvies; de gebruiksaanwijzing/het etiket is leidend.",
+            "reasoning": "", "tool_calls": ["ctgb_toelating"], "sources": [SOURCE], "grounding": "green", "cards": [format_card(lk) for lk in shown]}
+
+
 def _plain(text: str, grounding: str = "green") -> dict:
     return {"answer": text, "reasoning": "", "tool_calls": [], "sources": [], "grounding": grounding}
 
@@ -239,6 +255,9 @@ def _render_assistant_extras(meta: dict, answer: str, key_prefix: str) -> None:
     if meta.get("reasoning"):
         with st.expander("Redenering (CoT)"):
             st.text(meta["reasoning"])
+    for j, card in enumerate(meta.get("cards") or []):
+        with st.expander("Officiële gegevens (letterlijk uit de bron, niet door het model geschreven)", expanded=True):
+            st.markdown(card)
     if meta.get("tool_calls"):
         st.caption("Tools gebruikt: " + ", ".join(meta["tool_calls"]))
 
@@ -304,7 +323,7 @@ if prompt := st.chat_input("Stel een vraag, bijv. 'is er vorstrisico deze week?'
                 final_answer = _disclaimer_suffix(resp.answer, resp.sources)
                 result = {
                     "answer": final_answer, "reasoning": resp.reasoning, "tool_calls": resp.tool_calls,
-                    "sources": resp.sources, "grounding": resp.grounding,
+                    "sources": resp.sources, "grounding": resp.grounding, "cards": resp.cards,
                 }
                 st.markdown(final_answer[len(resp.answer):])  # the sources/disclaimer tail, appended after the live-streamed text
             except (ConnectionError, RuntimeError) as exc:
