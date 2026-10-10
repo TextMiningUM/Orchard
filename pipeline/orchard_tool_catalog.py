@@ -129,6 +129,22 @@ def _logboek_zoeken(arg: str | None, logbook_index) -> ToolResult:
     return ToolResult(facts=note + format_logbook(hits), sources=logbook_sources(hits))
 
 
+def _waterbalans(_arg: str | None, ctx) -> ToolResult:
+    from pipeline import orchard_tools
+    from pipeline.orchard_water_service import SOURCE_LABEL, advisor_summary, compute_water_state
+
+    def history(lat, lon, start, end):
+        rows, _citation = orchard_tools.get_weather_history_detailed(lat, lon, start, end)
+        return [(r.date, r.precipitation_mm or 0.0, r.et0_evapotranspiration_mm) for r in rows]
+
+    try:
+        state = compute_water_state(ctx.lat, ctx.lon, history_fetch=history, forecast_fetch=orchard_tools.get_forecast_water_inputs,
+                                    latest_archive=orchard_tools.latest_available_archive_date())
+    except Exception as exc:  # noqa: BLE001 -- say so instead of inventing numbers
+        return ToolResult(facts=f"Waterbalans niet te berekenen (weerdata niet bereikbaar: {exc}). Geef geen getallen.")
+    return ToolResult(facts=advisor_summary(state), sources=[SOURCE_LABEL])
+
+
 def build_tool_catalog(ctx, snapshot: dict | None, rag_index: RagIndex | None) -> dict[str, BoundTool]:
     """Returns the full tool catalogue, each tool already bound to the current `ctx`
     (location/variety/stage), `snapshot` (this session's compute_season_snapshot() result --
@@ -195,6 +211,13 @@ def build_tool_catalog(ctx, snapshot: dict | None, rag_index: RagIndex | None) -
                 name="vruchtbarsten_risico",
                 description="Wat is het risico op vruchtbarsten door regen rond de oogst?",
                 arg_hint=None, fn=lambda _a: _vruchtbarsten_risico(_a, ctx, snapshot),
+            ),
+            "waterbalans": BoundTool(
+                name="waterbalans",
+                description="Is het te droog of te nat? Geeft de waterbalans (neerslag min gewasverdamping, bodemvocht, "
+                             "neerslagtekort) van de afgelopen dagen en de verwachting voor de komende 7 dagen. "
+                             "Gebruik dit voor vragen over droogte, beregenen of te veel regen.",
+                arg_hint=None, fn=lambda _a: _waterbalans(_a, ctx),
             ),
         })
     return catalog

@@ -31,11 +31,36 @@ def _page():
 
 
 @pytest.fixture(autouse=True)
-def _fresh_cache():
+def _fresh_cache(monkeypatch):
     import streamlit as st
     st.cache_data.clear()
+    # no network in tests: by default the forecast is switched off; tests that want one set their own stub
+    monkeypatch.setattr(orchard_tools, "get_forecast_water_inputs", lambda lat, lon, days: [])
     yield
     st.cache_data.clear()
+
+
+def test_forecast_is_shown_distinctly_with_outlook_metrics(monkeypatch):
+    monkeypatch.setattr(orchard_tools, "get_weather_history_detailed", _stub(rain=lambda i: 2.0, et0=lambda i: 3.0))
+    monkeypatch.setattr(orchard_tools, "get_forecast_water_inputs",
+                        lambda lat, lon, days: [((date(2026, 10, 9) + timedelta(days=i)).isoformat(), 0.0, 4.0) for i in range(days)])
+    at = AppTest.from_function(_page, default_timeout=60).run()
+    assert not at.exception, [e.value for e in at.exception]
+    labels = [m.label for m in at.metric]
+    assert "Verwachte delta" in labels and "Bodemvocht aan het eind" in labels
+    assert any(m.label.startswith("Neerslag (30 d)") for m in at.metric)
+    df = at.dataframe[-1].value
+    assert (df["Soort"] == "verwachting").sum() == 7 and df["Soort"].iloc[0] == "verwachting"   # table shows newest first
+
+
+def test_a_failing_forecast_leaves_the_past_visible(monkeypatch):
+    def boom(*a, **k):
+        raise ConnectionError("offline")
+    monkeypatch.setattr(orchard_tools, "get_weather_history_detailed", _stub())
+    monkeypatch.setattr(orchard_tools, "get_forecast_water_inputs", boom)
+    at = AppTest.from_function(_page, default_timeout=60).run()
+    assert not at.exception and "Bodemvocht nu" in [m.label for m in at.metric]
+    assert any("verwachting kon nu niet worden opgehaald" in c.value for c in at.caption)
 
 
 def test_section_renders_metrics_two_charts_and_the_table(monkeypatch):

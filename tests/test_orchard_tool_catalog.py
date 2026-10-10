@@ -49,7 +49,38 @@ def test_build_tool_catalog_without_snapshot_only_has_kb_and_ctgb():
 def test_build_tool_catalog_with_snapshot_adds_weather_tools():
     catalog = build_tool_catalog(_FakeCtx(), snapshot=_fake_snapshot(), rag_index=None)
     assert {"weer_vooruitzicht", "koude_uren", "vorst_risico", "suzuki_risico",
-            "vruchtbarsten_risico"} <= set(catalog)
+            "vruchtbarsten_risico", "waterbalans"} <= set(catalog)
+
+
+def test_waterbalans_tool_reports_deterministic_numbers_and_forecast(monkeypatch):
+    from datetime import date, timedelta
+    from types import SimpleNamespace
+    from pipeline import orchard_tools
+
+    def hist(lat, lon, start, end):
+        d0, d1 = date.fromisoformat(start), date.fromisoformat(end)
+        return [SimpleNamespace(date=(d0 + timedelta(days=i)).isoformat(), precipitation_mm=0.0, et0_evapotranspiration_mm=5.0)
+                for i in range((d1 - d0).days + 1)], "stub"
+
+    def fc(lat, lon, days):
+        d0 = date.today()
+        return [((d0 + timedelta(days=i)).isoformat(), 0.0, 5.0) for i in range(days)]
+
+    monkeypatch.setattr(orchard_tools, "get_weather_history_detailed", hist)
+    monkeypatch.setattr(orchard_tools, "get_forecast_water_inputs", fc)
+    result = build_tool_catalog(_FakeCtx(), snapshot=_fake_snapshot(), rag_index=None)["waterbalans"].fn(None)
+    assert "laatste 7 dagen" in result.facts and "Verwachting komende 7 dagen" in result.facts
+    assert "indicatief" in result.facts and result.sources
+
+
+def test_waterbalans_tool_says_so_when_weather_is_unreachable(monkeypatch):
+    from pipeline import orchard_tools
+
+    def boom(*a, **k):
+        raise ConnectionError("offline")
+    monkeypatch.setattr(orchard_tools, "get_weather_history_detailed", boom)
+    result = build_tool_catalog(_FakeCtx(), snapshot=_fake_snapshot(), rag_index=None)["waterbalans"].fn(None)
+    assert "niet te berekenen" in result.facts and "Geef geen getallen" in result.facts
 
 
 def test_ctgb_toelating_tool_always_returns_guardrail_text():

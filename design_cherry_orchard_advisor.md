@@ -2237,9 +2237,21 @@ verdamping 64 mm); op 9 oktober +15,8 mm. Tests: 14 voor de rekenkern (handberek
 331 → 351 tests.
 
 **Beperkingen / eerlijk**: (1) **Zonder grondwater-opstijging en zonder beregening is de schatting pessimistisch** — veel Nederlandse kersenpercelen krijgen water uit het grondwater; dit staat ook in de
-pagina. (2) Grondsoort en wortelzone zijn aannames; een bodemanalyse (Deel C.4/C.7) en bij voorkeur een vochtsensor maken er een echte meting van. (3) Alleen het verleden (tot gisteren, de archief-API heeft
-vandaag nog niets); een vooruitblik vraagt ET0 uit de forecast. (4) Kc voor kers is een benadering; de curve is niet gekalibreerd op dit perceel. (5) Eén emmer, geen bodemlagen of grondwaterstand.
+pagina. (2) Grondsoort en wortelzone zijn aannames; een bodemanalyse (Deel C.4/C.7) en bij voorkeur een vochtsensor maken er een echte meting van. (3) Het verleden loopt tot gisteren (de archief-API heeft vandaag nog niets); de 7-daagse vooruitblik gebruikt de forecast (zie hieronder). (4) Kc voor kers is een benadering; de curve is niet gekalibreerd op dit perceel. (5) Eén emmer, geen bodemlagen of grondwaterstand.
 
-**Volgende stappen**: bodemanalyse of vochtsensor invoeren (TAW echt maken) en grondwater/opstijging modelleren; beregening uit de praktijk vastleggen (nu alleen sessie-invoer); een vooruitblik van 7 dagen
-met de forecast-ET0; de waterbalans als tool voor de adviseur ("is het te droog?") met dezelfde deterministische functie; koppeling met barstrisico rond de oogst
-([Deel B](#sec-b1), `evaluate_rain_crack_risk`) en met ziektedruk (bladnatperiode); en een kalibratie met de seizoenen uit het logboek (bv. "met de gieter rond de boompjes" 2013).
+**Volgende stappen** (bijgewerkt hieronder, zie "Vooruitblik en adviseur-tool"): bodemanalyse of vochtsensor invoeren (TAW echt maken) en grondwater/opstijging modelleren; beregening uit de praktijk vastleggen
+(nu alleen sessie-invoer); koppeling met barstrisico rond de oogst ([Deel B](#sec-b1), `evaluate_rain_crack_risk`) en met ziektedruk (bladnatperiode).
+
+### Vooruitblik en adviseur-tool (2026-10-10)
+
+- **Vooruitblik 7 dagen**: `orchard_tools.get_forecast_water_inputs()` haalt neerslag en `et0_fao_evapotranspiration` uit de Open-Meteo-forecast. `pipeline/orchard_water_service.py::compute_water_state()` rekent
+  de bodemvoorraad door tot en met gisteren (archief) en gaat daarna **verder met de forecast vanaf de werkelijke eindstand** (dagen die al in het archief staan worden niet dubbel geteld). Op het dashboard staan de
+  verwachte dagen gearceerd/lichter in een grijs vlak "verwachting", met vier eigen getallen (verwachte neerslag, gewasverdamping, delta, bodemvocht aan het eind) en een melding bij eerste stress-/natte dag.
+  Mislukt de forecast, dan blijft het verleden gewoon staan met een korte melding. De verwachting is richting, geen exact getal (dagelijkse neerslag is onzeker).
+- **Adviseur-tool `waterbalans`** (alleen in de catalogus met weer-snapshot, dus de SFT-prompts met `snapshot=None` veranderen niet): geeft via dezelfde service een Nederlandse feitentekst — delta laatste 7 en 30 dagen, bodemvocht en
+  status, KNMI-stijl tekort, verwachting, aannames en het "indicatief"-label. Het model rekent niets zelf; bij weerstoring zegt de tool dat en geeft hij geen getallen. Bron: "Waterbalans (FAO-56, Open-Meteo; indicatief)".
+  De tool gebruikt de standaardinstellingen (leem, 1,0 m, gras); de aangepaste instellingen van het dashboard zijn sessie-invoer en bereiken de adviseur (nog) niet.
+- **Echte controle** (9 oktober 2026, 52,0/5,5): laatste 7 d neerslag 24 mm, ETc 11 mm, delta +13 mm; laatste 30 d delta +1 mm; bodemvocht 47% (te droog); verwachting 10 mm regen tegen 8 mm verdamping.
+- **Kalibratie op het logboek: niet haalbaar.** Het logboek (484 opmerkingen) bevat geen beregening en geen opbrengst- of droogte-uitkomst; "droog" komt 8× voor, "gieter" 1× (2013) en er is geen vochtmeting.
+  Kalibreren van Kc, wortelzone of drempels vraagt een uitkomst (vochtsensor, stressscore, opbrengst) per seizoen; die kan de teler gaan vastleggen. Tot dan blijft de status een FAO-56-indicatie.
+- Tests: 362 groen (nieuw: service met continuering/dubbele dagen/forecast-storing/uitblik, tool, pagina met forecast en storing).

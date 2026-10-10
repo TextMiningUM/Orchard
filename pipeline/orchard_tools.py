@@ -80,6 +80,20 @@ def get_weather_forecast(lat: float, lon: float, days: int = 7) -> WeatherSeries
     )
 
 
+def get_forecast_water_inputs(lat: float, lon: float, days: int = 7) -> list[tuple[str, float, float | None]]:
+    """(datum, neerslag mm, ET0 mm) per dag voor de komende ``days`` dagen (vanaf vandaag) uit de Open-Meteo-forecast; voedt de waterbalans-vooruitblik.
+    ET0 is de FAO-56 Penman-Monteith-referentieverdamping die Open-Meteo zelf berekent."""
+    days = max(1, min(days, 16))
+    params = {"latitude": lat, "longitude": lon, "forecast_days": days, "timezone": "Europe/Amsterdam",
+              "daily": "precipitation_sum,et0_fao_evapotranspiration"}
+    data = _http_get_json(f"{_OPEN_METEO_FORECAST_URL}?{urllib.parse.urlencode(params)}")
+    d = data.get("daily", {})
+    times = d.get("time", [])
+    precip = d.get("precipitation_sum") or [0.0] * len(times)
+    et0 = d.get("et0_fao_evapotranspiration") or [None] * len(times)
+    return [(t, precip[i] or 0.0, et0[i]) for i, t in enumerate(times)]
+
+
 def get_weather_history(lat: float, lon: float, start_date: str, end_date: str) -> WeatherSeries:
     """Fetch an hourly + daily historical series via Open-Meteo's Historical Weather API.
 

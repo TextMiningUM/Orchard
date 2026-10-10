@@ -5,7 +5,7 @@ Gedeeld door het Boomgaard Dashboard (onderaan) en eventuele eigen pagina's; de 
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -14,11 +14,12 @@ import streamlit as st
 from pipeline import orchard_tools
 from pipeline.orchard_water_balance import (CITATION, DEFAULT_ROOT_DEPTH_M, DEPLETION_FRACTION, DRY_WARN_FRACTION_OF_RAW,
                                             KNMI_CITATION, ROOT_DEPTH_RANGE_M, SOIL_PRESETS, STATUS_DRY, STATUS_DRY_WARN,
-                                            STATUS_OK, STATUS_WET, DayInput, WaterBalanceConfig, cumulative_delta,
-                                            knmi_deficit, period_summary, spinup_start, water_balance)
+                                            STATUS_OK, STATUS_WET, WaterBalanceConfig, cumulative_delta, period_summary)
+from pipeline.orchard_water_service import compute_water_state, outlook
 
 STATUS_ICON = {STATUS_OK: "🟢 ok", STATUS_DRY_WARN: "🟡 droog (let op)", STATUS_DRY: "🔴 te droog", STATUS_WET: "🔵 nat"}
 POSITIVE, NEGATIVE = "#2e86c1", "#d35400"
+FORECAST_DAYS = 7
 
 
 @st.cache_data(ttl=3 * 3600, show_spinner=False)
@@ -28,14 +29,25 @@ def fetch_daily_weather(lat: float, lon: float, start: str, end: str) -> list[tu
     return [(r.date, r.precipitation_mm or 0.0, r.et0_evapotranspiration_mm) for r in rows]
 
 
+@st.cache_data(ttl=3 * 3600, show_spinner=False)
+def fetch_forecast_weather(lat: float, lon: float, days: int) -> list[tuple[str, float, float | None]]:
+    """(datum, neerslag mm, ET0 mm) voor de komende dagen uit de Open-Meteo-forecast; 3 uur gecachet."""
+    return orchard_tools.get_forecast_water_inputs(lat, lon, days)
+
+
 def delta_figure(df: pd.DataFrame) -> go.Figure:
     """Staven = delta per dag (blauw: meer water erbij dan het gewas verbruikt; oranje: tekort), lijn = cumulatief over de periode."""
     fig = go.Figure()
+    is_fc = (df["Soort"] == "verwachting") if "Soort" in df else pd.Series(False, index=df.index)
     fig.add_bar(x=df["Datum"], y=df["Delta (mm)"], name="Delta per dag (mm)",
                 marker_color=[POSITIVE if v >= 0 else NEGATIVE for v in df["Delta (mm)"]],
+                marker_opacity=[0.45 if f else 1.0 for f in is_fc], marker_pattern_shape=["/" if f else "" for f in is_fc],
                 hovertemplate="%{x}<br>delta %{y:+.1f} mm<extra></extra>")
     fig.add_trace(go.Scatter(x=df["Datum"], y=df["Cumulatief (mm)"], name="Cumulatief over de periode (mm)", yaxis="y2",
                              line=dict(color="#555", width=2), hovertemplate="%{x}<br>cumulatief %{y:+.0f} mm<extra></extra>"))
+    if is_fc.any():
+        fig.add_vrect(x0=df.loc[is_fc, "Datum"].iloc[0], x1=df["Datum"].iloc[-1], fillcolor="#bbb", opacity=0.15, line_width=0,
+                      annotation_text="verwachting", annotation_position="top left")
     fig.add_hline(y=0, line_width=1, line_color="#999")
     fig.update_layout(yaxis=dict(title="Delta per dag (mm)", zeroline=True),
                       yaxis2=dict(title="Cumulatief (mm)", overlaying="y", side="right", showgrid=False),
@@ -52,16 +64,21 @@ def moisture_figure(df: pd.DataFrame, depletion_fraction: float = DEPLETION_FRAC
     fig.add_hrect(y0=stress, y1=warn, fillcolor="#f1c40f", opacity=0.10, line_width=0)
     fig.add_trace(go.Scatter(x=df["Datum"], y=df["Bodemvocht (%)"], name="Bodemvocht (% van beschikbaar water)",
                              line=dict(color="#1a5276", width=2)))
+    if "Soort" in df and (df["Soort"] == "verwachting").any():
+        fc = df[df["Soort"] == "verwachting"]
+        fig.add_vrect(x0=fc["Datum"].iloc[0], x1=df["Datum"].iloc[-1], fillcolor="#bbb", opacity=0.15, line_width=0,
+                      annotation_text="verwachting", annotation_position="top left")
     fig.add_hline(y=stress, line_dash="dot", line_color="#c0392b",
                   annotation_text="vanaf hier neemt de opname af (stress)", annotation_position="bottom right")
     fig.update_layout(yaxis=dict(title="% van beschikbaar water", range=[0, 105]), height=260, margin=dict(t=20), showlegend=False)
     return fig
 
 
-def build_frame(shown, knmi: dict[str, float | None]) -> pd.DataFrame:
+def build_frame(shown, knmi: dict[str, float | None], forecast_from: str | None = None) -> pd.DataFrame:
     cum = cumulative_delta(shown)
     return pd.DataFrame([{
-        "Datum": r.date, "Neerslag (mm)": round(r.precipitation_mm, 1), "Beregening (mm)": round(r.irrigation_mm, 1),
+        "Datum": r.date, "Soort": "verwachting" if forecast_from and r.date >= forecast_from else "waargenomen",
+        "Neerslag (mm)": round(r.precipitation_mm, 1), "Beregening (mm)": round(r.irrigation_mm, 1),
         "ET0 (mm)": round(r.et0_mm, 1) if not r.et0_missing else None, "Kc": round(r.kc, 2),
         "Gewasverdamping (mm)": round(r.etc_mm, 1), "Delta (mm)": round(r.delta_mm, 1), "Cumulatief (mm)": round(c, 1),
         "Afvoer (mm)": round(r.drainage_mm, 1), "Bodemvocht (%)": round(r.soil_moisture_pct, 0),
@@ -94,27 +111,22 @@ def render_waterbalance_section(lat: float, lon: float, today: date | None = Non
                                 column_config={"Datum": st.column_config.DateColumn("Datum", format="YYYY-MM-DD"),
                                                "Beregening (mm)": st.column_config.NumberColumn(min_value=0.0, max_value=100.0, format="%.1f")})
 
-    end = min(today - timedelta(days=1), orchard_tools.latest_available_archive_date())
-    start = spinup_start(end, period)
-    try:
-        with st.spinner("Weerdata voor de waterbalans ophalen (Open-Meteo)..."):
-            raw = fetch_daily_weather(round(lat, 4), round(lon, 4), start.isoformat(), end.isoformat())
-    except Exception as exc:  # noqa: BLE001 -- fail visibly, never show invented data
-        st.error(f"Kon de weerdata voor de waterbalans niet ophalen: {exc}")
-        return
-    if not raw:
-        st.info("Geen weerdata beschikbaar voor deze periode.")
-        return
-
     irrigation: dict[str, float] = {}
     for _, row in irr_df.dropna(subset=["Datum", "Beregening (mm)"]).iterrows():
         irrigation[str(row["Datum"])[:10]] = irrigation.get(str(row["Datum"])[:10], 0.0) + float(row["Beregening (mm)"])
-    inputs = [DayInput(d, p, e, irrigation.get(d, 0.0)) for d, p, e in raw]
     cfg = WaterBalanceConfig(soil=soil, root_depth_m=float(root), ground_cover=cover)
-    results = water_balance(inputs, cfg)
-    shown = results[-period:]
-    knmi = dict(knmi_deficit(inputs))
-    df = build_frame(shown, knmi)
+    try:
+        with st.spinner("Weerdata voor de waterbalans ophalen (Open-Meteo)..."):
+            state = compute_water_state(lat, lon, history_fetch=fetch_daily_weather, forecast_fetch=fetch_forecast_weather, today=today,
+                                        period_days=period, forecast_days=FORECAST_DAYS, cfg=cfg, irrigation=irrigation,
+                                        latest_archive=orchard_tools.latest_available_archive_date())
+    except Exception as exc:  # noqa: BLE001 -- fail visibly, never show invented data
+        st.error(f"Kon de weerdata voor de waterbalans niet ophalen: {exc}")
+        return
+    start = date.fromisoformat(state.start)
+    shown = state.observed[-period:]
+    knmi = state.knmi
+    df = build_frame(shown + state.forecast, knmi, state.forecast_from)
     summary = period_summary(shown)
     last = shown[-1]
 
@@ -134,6 +146,24 @@ def render_waterbalance_section(lat: float, lon: float, today: date | None = Non
         m6.metric("Neerslagtekort sinds 1 apr", "n.v.t." if season_end is None else f"{season_end[1]:.0f} mm",
                   "buiten 1 apr-30 sep" if season_end is None else f"eindstand {season_end[0]}", delta_color="off")
 
+    o = outlook(state.forecast)
+    if o:
+        f1, f2, f3, f4 = st.columns(4)
+        f1.metric(f"Verwachte neerslag ({o['days']} d)", f"{o['precipitation_mm']:.0f} mm")
+        f2.metric("Verwachte gewasverdamping", f"{o['etc_mm']:.0f} mm")
+        f3.metric("Verwachte delta", f"{o['delta_mm']:+.0f} mm", "overschot" if o["delta_mm"] >= 0 else "tekort",
+                  delta_color="normal" if o["delta_mm"] >= 0 else "inverse")
+        f4.metric("Bodemvocht aan het eind", f"{o['moisture_end_pct']:.0f}%", STATUS_ICON[o["status_end"]], delta_color="off")
+        if o["first_stress_date"]:
+            st.warning(f"Droogtestress verwacht vanaf {o['first_stress_date']} als er niet beregend wordt.")
+        elif o["first_warn_date"]:
+            st.info(f"Het wordt droog (let op) vanaf {o['first_warn_date']}.")
+        if o["first_wet_date"]:
+            st.info(f"Afvoer door veel regen (nat) verwacht vanaf {o['first_wet_date']}.")
+        st.caption("De verwachting gebruikt de Open-Meteo-weersvoorspelling (neerslag en ET0) en begint bij de berekende eindstand van gisteren; "
+                   "neerslag is per dag onzeker, dus lees dit als richting, niet als exact getal.")
+    elif state.forecast_error:
+        st.caption("De verwachting kon nu niet worden opgehaald; alleen het verleden is getoond.")
     st.plotly_chart(delta_figure(df), width="stretch")
     st.plotly_chart(moisture_figure(df, cfg.depletion_fraction), width="stretch")
     if summary["stress_days"] or summary["wet_days"]:
