@@ -105,6 +105,8 @@ Bronnen voor dit ontwerp:
 - [Deel H — Aanbevelingen voor de teler: wat meten en vastleggen vanaf 2027](#deel-h) *(los te lezen; bedoeld om aan de teler te geven)*
   - [H.0 Waarom dit nodig is](#sec-h0) · [H.1 Vijf spelregels](#sec-h1) · [H.2 De korte lijst (begin hier)](#sec-h2) · [H.3 Volledig overzicht per onderwerp](#sec-h3)
   - [H.4 Camera's](#sec-h4) · [H.5 Jaarkalender 2027](#sec-h5) · [H.6 Wat de adviseur met elke meting doet](#sec-h6) · [H.7 Starterspakket](#sec-h7) · [H.8 Wat wij bouwen om dit te ontvangen](#sec-h8)
+- [Deel I — Plan voor seizoen 2027: fases, beslismomenten, bouwlijst, succescriteria en risico's](#deel-i)
+  - [I.0 Doel](#sec-i0) · [I.1 Beginstand](#sec-i1) · [I.2 Besluiten vóór 1 december](#sec-i2) · [I.3 Tijdlijn per fase](#sec-i3) · [I.4 Bouwlijst](#sec-i4) · [I.5 Succescriteria](#sec-i5) · [I.6 Risico's](#sec-i6) · [I.7 Bewust niet](#sec-i7) · [I.8 Eerstvolgende stappen](#sec-i8)
 
 ---
 
@@ -814,8 +816,8 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
 2. **Deterministische kern v0**: koude-uren + GDD-berekening, gevalideerd tegen 1–2 bekende seizoenen
    uit de logboeken. — ✅ **GEDAAN** (`pipeline/orchard_phenology_spec.py`, zie [G.2](#sec-g2)).
 3. **Tool-laag v0**: Open-Meteo (verleden+toekomst) + Ctgb-opzoekfunctie, zonder LLM — puur
-   geverifieerde data-ophaal-functies. — ✅ **GEDAAN voor weer/neerslag/geocoding**; Ctgb/bodem blijven
-   bewuste stubs (zie [C.4](#sec-c4)/[C.5](#sec-c5)).
+   geverifieerde data-ophaal-functies. — ✅ **GEDAAN voor weer/neerslag/geocoding én Ctgb** (de open Ctgb-API is sinds 2026-10-10 aangesloten,
+   [G.31](#sec-g31)); alleen de bodem-API (BOFEK) blijft een bewuste stub (zie [C.4](#sec-c4)).
 4. **RAG v0**: alleen Track 1 (WUR/Actua Steenfruit/Ctgb), nog zonder logboeken. — ✅ **GEDAAN**
    (7 documenten, dense retrieval + reranking, zie [G.5](#sec-g5)/[G.6](#sec-g6)).
 5. **Eerste Mistral-SFT**: basis vraag-antwoord-gedrag op Track 1-data. — 🟡 **EERSTE RONDE GEDAAN (2026-10-10, [G.28](#sec-g28))**: QLoRA op Qwen3-8B
@@ -837,7 +839,13 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
    herhaalmeting na de RAG-herbouw zijn gedaan ([G.25](#sec-g25), [G.27](#sec-g27)); nog te doen: herhaalde runs (ruis ±5 pt) en een
    nieuwe held-out set.
    139 → 240 UNIT-tests bestaan ook (zie [G.11](#sec-g11)), maar dat is iets anders dan een
-   agronomische kwaliteits-evaluatie.
+   agronomische kwaliteits-evaluatie. **Stand 2026-10-10**: 114 vragen (gouden + held-out v2, n = 31 held-out), herhaalde runs, deterministische reward en
+   guardrail-sets zijn gedaan ([G.28](#sec-g28)); nog te doen: een grotere held-out set (n ≥ 60), multi-turn- en tool-gesprekken, en merknaam-/multi-hop-scenario's ([Deel I](#deel-i)).
+10. **Waterbalans (te droog / te nat)** — ✅ **GEDAAN** (2026-10-10, [G.29](#sec-g29)): FAO-56-emmer, 7-daagse vooruitblik, dashboard en adviseur-tool `waterbalans`.
+11. **Logboek-kalender** — ✅ **GEDAAN** (2026-10-10, [G.30](#sec-g30)): "wat deed ik rond deze tijd?", dedupe van dubbel ingescande regels, adviseur-tool `logboek_kalender`.
+12. **Ctgb-opzoektool + `middel_opzoeken`** — ✅ **GEDAAN** (2026-10-10, [G.31](#sec-g31)): open API, officiële voorschriftkaart, eigen gebruik + praktijkcontrole.
+13. **Seizoen 2027: uitkomsten vastleggen, multi-hop-adviezen met poorten, kalibratie, daarna SFT/DPO op echte uitkomsten** — 🟦 **GEPLAND**, zie [Deel I](#deel-i)
+    (en [Deel H](#deel-h) voor wat de teler vastlegt).
 
 ---
 
@@ -1004,6 +1012,16 @@ tool-gebaseerd systeem zonder fine-tuning gebouwd, zie [G.6](#sec-g6)):
     database zelf, lokaal-only blijven en nooit in de publieke pod-kennisbank terechtkomen.
     **GEBOUWD, lokaal-only (2026-10-10, [G.27](#sec-g27))**: `orchard_logbook_rag.py` (tool `logboek_zoeken` + upfront-retrieval voor
     "eigen historie"-vragen, alleen met `ORCHARD_LOGBOOK_RAG=1`, niet op de pod). Nog te doen: de 487 regels laten verifiëren (0 geverifieerd).
+22. **Waar voert de teler in het seizoen gegevens in (privacy en toegang)?** De regel is dat bedrijfsdata (logboek, scans, instellingen, straks oogst/foto's) lokaal blijft; de publieke pod
+    heeft sinds 2026-10-09 echter een schrijfbare verificatiepagina met de database en scans, bereikbaar voor iedereen met de URL (zie "Local vs cloud"). Voor invoer in het veld (telefoon)
+    is een **privé, beveiligde instantie** nodig (login of VPN), gescheiden van de publieke, alleen-lezen spiegel. Besluit nodig vóór de datainvoer begint ([Deel I](#deel-i), D1).
+23. **Perceel-/blok-/rijindeling**: bestaat er een kaart met blokken, rijnummers en rassen? Nodig om elke meting, behandeling en pluk aan een plek te koppelen ([H.1](#sec-h1)).
+24. **Syllit-bevinding ([G.31](#sec-g31))**: kloppen de 3–5 toepassingen per jaar in het logboek (of zijn het deelbehandelingen/aparte percelen)? En wat is er in plaats van Movento gebruikt
+    sinds de toelating onder die naam verliep? Alleen de teler kan dat bevestigen.
+25. **Beregening en watervoorziening**: is er beregening of druppelirrigatie, uit welke bron (grondwater/sloot/leiding), en wordt de hoeveelheid ergens gemeten? Nodig voor de waterbalans ([G.29](#sec-g29)).
+26. **Afzet en prijzen**: welke klassen/maten worden verkocht, tegen welke prijs, en waar worden de kilo's nu al ergens geregistreerd? Nodig voor de economie-koppeling ([H.3](#sec-h3) I).
+27. **Verificatiecapaciteit**: wie verifieert de 487 logboekregels (en de 2026-regels die nog ingevoerd moeten worden) en hoeveel uur per week is daarvoor beschikbaar? Zonder verificatie blijft 0 van 487 regels bevestigd.
+28. **Budget en beheer van sensoren en camera's**: wat is de ruimte en wie plaatst, onderhoudt en leest ze uit ([H.7](#sec-h7))? Bepaalt of we met het starterspakket beginnen of verder gaan.
 
 ---
 
@@ -2484,3 +2502,126 @@ opbrengst en kwaliteit werkt, ontbreken vier dingen: **uitkomsten** (kilo's, kla
 - **Foto-opslag lokaal** met een eenvoudig overzicht per camera en dag, en een invoerveld voor de handmatige BBCH-waarheid.
 - **Kalibratie** zodra er een seizoen met uitkomsten is: Kc, wortelzone en drempels van de waterbalans, graaddagen voor bloei en oogst, en het Suzuki-/barstrisico, elk met een eerlijke vergelijking van voor en na.
 - Pas daarna zinvolle **DPO/SFT op uitkomsten** (zie [G.28](#sec-g28)): zonder echte uitkomsten blijft de beloning een proxy.
+
+---
+
+<a id="deel-i"></a>
+# Deel I — Plan voor seizoen 2027: fases, beslismomenten, bouwlijst, succescriteria en risico's
+
+*Dit deel past de roadmap ([Deel E](#deel-e)) aan op de stand van 2026-10-10. Het is een plan, geen status: houd de statussen hieronder bij zodra iets af is. Wat de teler vastlegt staat in [Deel H](#deel-h); hier staat wat wij bouwen, in welke volgorde en wanneer we beslissen.*
+
+<a id="sec-i0"></a>
+## I.0 Doel van seizoen 2027
+
+1. **Alles wat gemeten of gedaan wordt komt in één lokaal datamodel**, per blok/rij/ras en per datum: behandelingen, scouting en vallen, fenologie, sensoren, foto's, schade, oogst en economie. Het logboek van 2013–2025 blijft de historie, 2026 en verder komt er digitaal bij.
+2. **De adviseur geeft een verifieerbaar "deze week"-overzicht**: fenofase, weer en vorstrisico, waterbalans, plaagdruk, wat je rond deze tijd gewoonlijk deed ([G.30](#sec-g30)) en welke middelen nu mogen ([G.31](#sec-g31)), elk met bron en kaart. Het blijft ondersteuning; de teler beslist.
+3. **Na het seizoen: kalibreren op uitkomsten en pas dan trainen.** Eén seizoen met echte uitkomsten (kilo's, klasse, barst, schade) laat zien welke modelparameters kloppen en geeft eindelijk een echt beloningssignaal voor SFT/DPO ([G.28](#sec-g28)).
+
+<a id="sec-i1"></a>
+## I.1 Beginstand (2026-10-10)
+
+| Onderdeel | Status |
+|---|---|
+| Deterministische kern (koude-uren, graaddagen, vorst, Suzuki, barstrisico) | ✅ gebouwd, nog niet gekalibreerd op uitkomsten |
+| Waterbalans met 7-daagse vooruitblik en tool | ✅ ([G.29](#sec-g29)), grondsoort en wortelzone zijn aannames |
+| RAG, kennisgraaf, procedurele graaf, probleem-OAC | ✅ ([G.25](#sec-g25), [G.27](#sec-g27)) |
+| Logboek als RAG-bron, logboek-kalender | ✅ lokaal ([G.27](#sec-g27), [G.30](#sec-g30)); **0 van 487 regels geverifieerd; 2026 staat er nog niet in** |
+| Ctgb-opzoektool met kaart, `middel_opzoeken`, praktijkcontrole | ✅ ([G.31](#sec-g31)); label-PDF's alleen gelinkt |
+| Eval, reward, rejection sampling, SFT v2 | ✅ ([G.28](#sec-g28)); `sft_v2` nog niet de standaard, held-out n = 31 |
+| vLLM op de pod, laadmelding, één engine tegelijk | ✅ ([G.28](#sec-g28)) |
+| Invoerpagina's voor oogst, scouting, vallen, schade, evaluatie | ❌ ([H.8](#sec-h8)) |
+| Sensor- en foto-import | ❌ |
+| Privé, beveiligde invoerinstantie | ❌ ([Deel F](#deel-f) 22) |
+| Compliance-poort (middelnaam in antwoord ⇒ Ctgb-aanroep in dezelfde beurt) | ❌ (ontworpen in [B.11](#sec-b11)/[G.31](#sec-g31)) |
+| Multi-hop-orchestrator met deterministische poort | ❌ (ontwerp in [G.31](#sec-g31)) |
+| Bodem-API (BOFEK) | ❌ stub |
+| Oogst-/opbrengstuitkomsten | ❌ blokkerende leemte ([C.7](#sec-c7), [Deel F](#deel-f) 9) |
+
+<a id="sec-i2"></a>
+## I.2 Besluiten die vóór 1 december 2026 nodig zijn
+
+| # | Besluit | Aanbeveling | Waarom nu |
+|---|---|---|---|
+| **D1** | Waar vindt datainvoer plaats? | Een **privé, beveiligde instantie** (login of VPN) voor invoer in het veld; de publieke pod blijft een alleen-lezen spiegel zonder bedrijfsdata. Een tweede, aparte Streamlit-service met eigen data-map, of lokaal-eerst met upload vanaf de telefoon. | De huidige schrijfbare verificatiepagina met database en scans staat open op de publieke URL ([Deel F](#deel-f) 22); zodra er oogst- en spuitdata bijkomt wordt dat een echt datalek-risico |
+| **D2** | Datamodel en opslag | Eén lokale SQLite `orchard_records.db` naast de logboek-DB (gitignored, dezelfde `AgentPaths`-discipline), met tabellen per soort meting en een gedeelde sleutel blok/rij/boom + datum. Foto's in een map, met pad *relatief* aan een `AgentPaths`-root (de les van [G.19](#sec-g19)). | Alles wat later volgt (kalibratie, kalender, training) leest hieruit; een latere herstructurering kost veel |
+| **D3** | Welke sensoren en camera's | Het **starterspakket** ([H.7](#sec-h7)); uitbreiden na het eerste seizoen. Besluit hangt af van budget en wie het beheert ([Deel F](#deel-f) 28). | Plaatsen kan in de rust (dec–feb); in de bloei is het te laat |
+| **D4** | Productie-adapter | `W0_base` blijft de standaard totdat `sft_v2` een gesprekstest (meerdere beurten, met tools) en een grotere held-out set (n ≥ 60) heeft doorstaan. | Zie de open punten van [G.28](#sec-g28); voorkomt een regressie in het seizoen |
+| **D5** | De pod over de winter | Houden voor de publieke spiegel en de modeldienst, trainen alleen bij een gepland trainingsvenster (de GPU wordt dan gedeeld, zie G.28). Kosten en gebruik laten de teler beoordelen. | Bepaalt of er in de rust getraind en geëvalueerd kan worden |
+| **D6** | Wie verifieert het logboek en wanneer | Vaste blokjes (bijv. 1 uur per week) in de rust, eerst 2025 en de middelen die in het advies terugkomen (Syllit, koper, ureum, zwavel). | Alle logboekafgeleide uitspraken staan op onbevestigde transcripties |
+
+<a id="sec-i3"></a>
+## I.3 Tijdlijn per fase
+
+| Fase | Teler | Wij bouwen | Poort aan het eind |
+|---|---|---|---|
+| **F0 · nu – 15 nov 2026** (bladval, nazorg) | rassen- en bloklijst, bodemanalyse, 2026-logboek aanleveren, vragen uit [Deel F](#deel-f) 22–28 beantwoorden, koper-/zinkrondes noteren | besluiten D1–D6 uitwerken; records-DB (D2) en importer voor het 2026-logboek; de verificatieflow (per regel bevestigen of corrigeren) | **P0 (1 dec)**: besluiten genomen, privé-instantie draait, 2026-logboek geïmporteerd |
+| **F1 · 15 nov 2026 – feb 2027** (rust) | sensoren, loggers en camera's plaatsen en testen; rij-/boomnummering; logboek verifiëren | **invoerpagina's v1** (spuit/bemesting met Ctgb-toets, scouting/vallen, fenologie, oogst, schade, seizoensevaluatie); sensorimport (CSV) en fotoverwerking; **compliance-poort**; **label-corpus** (Ctgb-gebruiksaanwijzingen → structuur-JSON → RAG, met de parsers uit de Code Library); **backtest** van de kern op 2013–2025 (zie onder); gesprekstest `sft_v2` en grotere held-out set | **P1 (1 mrt) = feature freeze**: invoer werkt op de telefoon, sensoren leveren data, backtest en eval zijn gedraaid |
+| **F2 · mrt – apr 2027** (knopzwelling, bloei) | wekelijks fenologie, vorstregistratie, bestuiving, schade-foto's | "**deze week**"-overzicht; vorst- en Suzuki-meldingen (e-mail of push) uit de deterministische kern; bugfixes, geen nieuwe functies | **P2 (15 mei)**: gebruik in de bloei geëvalueerd (hoeveel invoer, welke fouten) |
+| **F3 · mei – jul 2027** (vruchtzetting, groei, oogst) | vallen wekelijks tellen, scouting, bespuitingen + effect, oogst per pluk, bladmonster in juli | **multi-hop-orchestrator v1** (spuitkandidaten met poort); waterbalans naast sensoren; barst-/Suzuki-risico naast waarnemingen | **P3 (1 aug)**: oogstdata compleet en gecontroleerd |
+| **F4 · aug – nov 2027** (nazorg, evaluatie, training) | seizoensevaluatie, bodem- en bladmonster, bladvalnotities | **kalibratie** (fenologie/graaddagen, waterbalans, barstrisico, Suzuki) met een eerlijke voor-en-na-vergelijking; **reward v2** met echte uitkomsten; trainingsdata uit 2027; **SFT v3 / DPO** | **P4 (1 nov)**: go/no-go voor een productie-adapter op basis van eval + gesprekstest |
+
+**Backtest (F1, goedkoop en nu al mogelijk)**: draai de deterministische kern en de risicoregels op het weer van 2013–2025 (Open-Meteo-archief) en leg ze naast wat de teler deed. Bijvoorbeeld: werd een vorstnacht of Suzuki-risico gesignaleerd in de dagen voor een ingreep, en hoe vaak werd er gespoten zonder signaal? Dat is geen opbrengstmeting,
+maar het toetst de regels en laat zien waar ze te streng of te los zijn, nog vóór het seizoen begint.
+
+<a id="sec-i4"></a>
+## I.4 Bouwlijst, op volgorde (omvang: S ≈ dagdeel, M ≈ dagen, L ≈ week of meer)
+
+| # | Onderdeel | Omvang | Hangt af van |
+|---|---|---|---|
+| 1 | Privé-instantie met login (D1) en `orchard_records.db` (D2), `AgentPaths` uitbreiden | M | besluit D1/D2 |
+| 2 | Importer en verificatieflow voor het 2026-logboek (en 2025 verifiëren) | M | 1 |
+| 3 | Invoerpagina's v1: spuit/bemesting (met Ctgb-toets en praktijkcontrole), scouting/vallen, fenologie, oogst, schade, seizoensevaluatie, export naar CSV | L | 1 |
+| 4 | Sensor-/loggerimport met controle op gaten en onmogelijke waarden; fotoverwerking met overzicht per camera en dag | M | 1 |
+| 5 | **Compliance-poort**: noemt een antwoord een middelnaam, dan moet er in dezelfde beurt een `ctgb_toelating`/`middel_opzoeken`-aanroep zijn, anders volgt een disclaimer; plus merknaam-vragen in de eval | S | — |
+| 6 | **Label-corpus**: Ctgb-gebruiksaanwijzingen en besluiten (PDF-links uit de API) → structuur-JSON → QC → RAG, zodat bijenregels, mengadviezen en etiketteksten citeerbaar zijn | M | Code Library ([G.26](#sec-g26)) |
+| 7 | **Multi-hop-orchestrator** "spuitkandidaten": situatie → probleem → kandidaten uit eigen historie → deterministische poort (toegestane maand en BBCH nu, interval en aantal tegen je laatste toepassing, veiligheidstermijn tegen verwachte oogst, bloeifase/bijen, werkzame stof per seizoen voor resistentie) → uitleg ([G.31](#sec-g31)) | L | 5, 6 |
+| 8 | "Deze week"-overzicht (kalender + fenofase + weer + waterbalans + poort-uitkomst) | M | 3, 7 |
+| 9 | Meldingen (e-mail/push) bij vorstrisico in de bloei en bij Suzuki-risico; dagelijkse samenvatting optioneel | M | 1 |
+| 10 | Kalibratieraamwerk: een functie per model die uitkomsten vergelijkt met voorspellingen (bandbreedte, geen schijnprecisie bij één seizoen) | M | 3, 4 (en seizoensdata) |
+| 11 | Eval uitbreiden: held-out n ≥ 60, gesprekken met meerdere beurten en tools, merknaam- en multi-hop-scenario's, vaste regressiepoort vóór elke adapterwissel | M | — |
+| 12 | Tooling voor training: de nieuwe tools (`waterbalans`, `logboek_kalender`, `middel_opzoeken`, Ctgb-kaart) in de SFT-prompts en trainingsdata opnemen; **let op: dit verandert de tool-prompt, dus een nieuwe SFT-ronde is nodig voordat ze standaard in productie mee gaan** | M | 11 |
+| 13 | Streaming-lusbeveiliging (nu alleen het opgeslagen antwoord wordt opgeschoond, [G.28](#sec-g28)) | S | — |
+| 14 | Bodem-API (BOFEK) i.p.v. een stub | S | optioneel |
+| 15 | SFT v3 / DPO op 2027-data en echte uitkomsten | L | F4 |
+
+<a id="sec-i5"></a>
+## I.5 Succescriteria (meetbaar, per poort)
+
+| Poort | Criteria |
+|---|---|
+| **P0** | Besluiten D1–D6 vastgelegd; privé-instantie bereikbaar met login; publieke spiegel bevat geen bedrijfsdata; 2026-logboek geïmporteerd en gedeeld met de dubbele-regel-controle van [G.30](#sec-g30) |
+| **P1** | Een invoer (behandeling, pluk, valtelling) kost de teler ≤ 1 minuut op de telefoon; sensoren leveren ≥ 95% van de uurwaarden in een testweek; backtest gedraaid en vastgelegd; guardrail-eval ≥ 95% en held-out dekking niet slechter dan de huidige standaard; gesprekstest `sft_v2` gedaan |
+| **P2** | ≥ 90% van de behandelingen en bijna alle vorstnachten in de bloei digitaal geregistreerd binnen 24 uur; geen meldingsfouten die tot een gemiste vorstwaarschuwing leidden |
+| **P3** | 100% van de plukken geregistreerd met kilo's en klasse; vallen wekelijks geteld in ≥ 90% van de weken tussen kleuring en oogst; sensor-uptime ≥ 90% |
+| **P4** | Kalibratieverslag per model met voor/na; reward v2 beschreven; een adapter alleen naar productie als de eval en de gesprekstest beter of gelijk zijn én de guardrail ≥ 95% blijft |
+
+<a id="sec-i6"></a>
+## I.6 Risico's en tegenmaatregelen
+
+| Risico | Tegenmaatregel |
+|---|---|
+| **Invoerlast** voor de teler (de belangrijkste reden dat dit mislukt) | ≤ 1 minuut per invoer, voorgevulde velden (laatste middel, standaardblok), telefoonvriendelijk, geen dubbele invoer; eerst alleen de top-10 uit [H.2](#sec-h2) |
+| **Datalek** door bedrijfsdata op de publieke pod | D1: aparte, beveiligde instantie; publieke spiegel zonder database, scans of instellingen |
+| **Eén seizoen is weinig data** | kalibreren als bandbreedte, niet als exact getal; modellen blijven deterministisch en citeerbaar; geen training die uitkomsten "leert" uit één jaar zonder controle |
+| **Sensoruitval of drift** | controles op gaten en onmogelijke waarden; vergelijking met de weer-API; handmatige controlemeting in het begin |
+| **Ctgb-API wijzigt of valt weg** | schijf-cache, storingsmelding, nooit een verzonnen status ([G.31](#sec-g31)); label-corpus als tweede bron |
+| **Regressie door een nieuwe adapter** | eval- en gesprekstest als vaste poort (I.4 #11), `W0_base` als terugvaloptie |
+| **Schijnzekerheid bij adviezen** | elke uitspraak met bron en kaart; praktijkcontrole en middelkeuze zijn ondersteuning, de teler beslist; de rood/groen-grounding is een heuristiek ([Deel F](#deel-f) 12) |
+| **Onbevestigde logboektranscripties** | verificatie als vaste taak (D6); uitspraken uit het logboek melden dat het niet geverifieerd is |
+
+<a id="sec-i7"></a>
+## I.7 Wat we in 2027 bewust niet doen
+
+- **Geen autonoom spuitadvies of spuitopdracht**; de adviseur toont opties, regels en historie.
+- **Geen beeldmodel in productie**; foto's worden verzameld, gelabeld en pas na een seizoen beoordeeld ([H.4](#sec-h4)).
+- **Geen multi-teler-platform** (single-tenant blijft, [Deel F](#deel-f) 7).
+- **Geen training op proxy-signalen als er echte uitkomsten komen**; DPO wacht tot er een echt beloningssignaal is.
+
+<a id="sec-i8"></a>
+## I.8 Eerstvolgende stappen (deze en volgende week)
+
+1. De teler beantwoordt de vragen in [Deel F](#deel-f) 22–28 en levert het 2026-logboek, de blokindeling en de rassenlijst aan.
+2. Besluit D1 (privé-instantie) nemen en uitwerken; dat is de voorwaarde voor al het andere.
+3. De records-database (D2) en de importer voor het 2026-logboek bouwen, daarna de verificatieflow.
+4. Het starterspakket van [H.7](#sec-h7) bestellen en een plaatsingsplan voor de rust maken.
+5. De compliance-poort (I.4 #5) en de backtest (I.3) oppakken: klein, onafhankelijk en nu al waardevol.
