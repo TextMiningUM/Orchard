@@ -80,6 +80,13 @@ def test_a_weather_outage_is_shown_as_an_error_not_as_invented_data(monkeypatch)
     assert not at.metric
 
 
+def test_after_the_season_the_knmi_deficit_shows_the_end_of_season_value(monkeypatch):
+    monkeypatch.setattr(orchard_tools, "get_weather_history_detailed", _stub(rain=lambda i: 0.0, et0=lambda i: 2.0))
+    at = AppTest.from_function(_page, default_timeout=60).run()      # "today" is 9 Oct: outside 1 Apr - 30 Sep
+    deficit = {m.label: m for m in at.metric}["Neerslagtekort sinds 1 apr"]
+    assert deficit.value.endswith("mm") and deficit.delta == "eindstand 2026-09-30"
+
+
 def test_changing_the_soil_changes_the_available_water(monkeypatch):
     monkeypatch.setattr(orchard_tools, "get_weather_history_detailed", _stub(rain=lambda i: 0.0, et0=lambda i: 4.0))
     at = AppTest.from_function(_page, default_timeout=60).run()

@@ -127,8 +127,12 @@ def render_waterbalance_section(lat: float, lon: float, today: date | None = Non
     m4.metric("Afvoer naar diepere lagen", f"{summary['drainage_mm']:.0f} mm")
     m5.metric("Bodemvocht nu", f"{last.soil_moisture_pct:.0f}%", STATUS_ICON[last.status], delta_color="off")
     deficit_now = knmi.get(last.date)
-    m6.metric("Neerslagtekort sinds 1 apr", "n.v.t." if deficit_now is None else f"{deficit_now:.0f} mm",
-              "KNMI-stijl, referentiegewas" if deficit_now is not None else "alleen 1 apr-30 sep", delta_color="off")
+    if deficit_now is not None:
+        m6.metric("Neerslagtekort sinds 1 apr", f"{deficit_now:.0f} mm", "KNMI-stijl, referentiegewas", delta_color="off")
+    else:  # outside 1 April - 30 September: show the final value of the season that just ended
+        season_end = next(((d, v) for d, v in reversed(list(knmi.items())) if v is not None), None)
+        m6.metric("Neerslagtekort sinds 1 apr", "n.v.t." if season_end is None else f"{season_end[1]:.0f} mm",
+                  "buiten 1 apr-30 sep" if season_end is None else f"eindstand {season_end[0]}", delta_color="off")
 
     st.plotly_chart(delta_figure(df), width="stretch")
     st.plotly_chart(moisture_figure(df, cfg.depletion_fraction), width="stretch")
