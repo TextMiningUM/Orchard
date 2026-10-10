@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from orchard_common import compute_season_snapshot, render_sidebar  # noqa: E402
+from waterbalance_view import render_waterbalance_section  # noqa: E402
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -143,3 +144,6 @@ if past_rows:
     st.caption(f"Bron: {past_citation}")
 else:
     st.info("Geen historische weerdata beschikbaar voor deze periode.")
+
+st.divider()
+render_waterbalance_section(ctx.lat, ctx.lon)

@@ -99,6 +99,7 @@ Bronnen voor dit ontwerp:
   - [G.26 Procedure: hoe we RAG bouwen en QC doen, en de Code Library](#sec-g26)
   - [G.27 KG, PG, OAC, logboek-RAG, trainingsdata, antwoord-eval en analyse (2026-10-10)](#sec-g27)
   - [G.28 Meetbetrouwbaarheid, held-out set, reward, rejection sampling en SFT-rondes (2026-10-10)](#sec-g28)
+  - [G.29 Waterbalans: dag-tot-dag delta neerslag minus verdamping, te droog of te nat (2026-10-10)](#sec-g29)
 
 ---
 
@@ -1665,7 +1666,7 @@ herschikt naar een functionele groepering — **alleen bestanden hernoemd** (`gi
 behouden), geen URL's veranderen (Streamlit's pagina-URL is de bestandsnaam ZONDER het
 numerieke voorvoegsel, dus bestaande links/bookmarks blijven werken):
 
-1. Boomgaard Dashboard — status in één oogopslag
+1. Boomgaard Dashboard — status in één oogopslag (sinds 2026-10-10 onderaan ook de **waterbalans**: delta per dag, bodemvocht, te droog/te nat, zie [G.29](#sec-g29))
 2. Waarschuwingen — directe vervolgvraag op de status ("en wat moet ik NU doen?")
 3. Vraag de Adviseur — interactief
 4. Seizoensplanning — kalenderreferentie
@@ -2191,3 +2192,54 @@ verwijderen: het laden van een tweede model (adapter naast basis) faalde. Nu bev
 3. 62 kaarten met "nog geen bron gevonden" laten verifiëren (nu uit de training gehouden) en LLM-OAC-extractie uit proza met letterlijke-span-verificatie.
 4. Logboek eerst verifiëren (0/487) vóór logboek-SFT; het logboek heeft geen uitkomsten, dus voor DPO/Reflectie uit eigen data is een uitkomstsignaal (oogst/schade per seizoen) nodig.
 5. Reward uitbreiden met een extern signaal (oogst/kwaliteit) en een echte sleutelfeiten-set per kaart in plaats van de proxy.
+
+<a id="sec-g29"></a>
+## G.29 Waterbalans: dag-tot-dag delta neerslag minus verdamping, te droog of te nat (2026-10-10)
+
+**Vraag (teler)**: bestaan er modellen die uitrekenen of er genoeg neerslag is geweest, na verrekening van de verdamping en wat het gewas nodig heeft en wat er op
+andere manieren bij komt of afgaat — een delta over een periode, zoals de landbouw gebruikt om te bepalen of het te droog of te nat is? Overzicht per dag, alleen de delta
+van de afgelopen periode, ook onderaan het Boomgaard Dashboard.
+
+**Antwoord: ja.** De gangbare benaderingen, van eenvoudig naar uitgebreid:
+1. **Neerslagoverschot/-tekort (klimatologisch)**: neerslag min referentieverdamping, cumulatief. In Nederland het **KNMI-neerslagtekort**: som van (verdamping − neerslag) vanaf 1 april, nooit onder 0
+   (bron: <https://www.knmi.nl/kennis-en-datacentrum/achtergrond/achtergrondinformatie-neerslagtekort>). Eenvoudig, landelijk bekend, maar kent geen gewas en geen bodem.
+2. **FAO-56-bodemwaterbalans** (Allen e.a. 1998, *FAO Irrigation and Drainage Paper 56*): een "emmer" in de wortelzone. Gewasverdamping ETc = Kc × ET0; water erin = regen + beregening; water eruit =
+   opname door het gewas + afvoer naar diepere lagen; de voorraad bepaalt of de boom stress heeft (te droog) of dat het overschot wegloopt (te nat). **Dit hebben we gebouwd.**
+3. **Uitgebreide dynamische modellen** (genoemd, hier niet gebruikt of gemeten): o.a. AquaCrop (FAO), WOFOST en SWAP (Wageningen) — nodig als je grondwater, bodemlagen en gewasgroei
+   mee wilt modelleren; vragen bodem- en gewasgegevens die we voor dit perceel (nog) niet hebben.
+
+**Gebouwd** (`pipeline/orchard_water_balance.py`, deterministisch en zonder model, zoals de rest van de rekenkern; weergave in `app/waterbalance_view.py`):
+- Per dag: `ETc = Kc·ET0` (FAO eq. 58); **`delta = neerslag + beregening − ETc`** (de gevraagde delta); bodemvoorraad `Dr` (eq. 85), stressfactor `Ks` (eq. 84), afvoer `DP` (eq. 88),
+  `TAW = 1000·(θFC−θWP)·Zr` (eq. 82), `RAW = p·TAW`. De massabalans klopt exact (getest): ingaand − opname − afvoer = verandering van de voorraad.
+- **Water erbij**: regen (Open-Meteo-archief) en beregening (door de teler in te voeren, per dag in mm; het logboek bevat geen beregening). **Water eraf**: gewasverdamping en afvoer onder de wortelzone.
+  Verwaarloosd (gedocumenteerd): oppervlakte-afvoer en capillaire opstijging uit het grondwater.
+- **Status per dag**: `te droog` (Dr > RAW, dus Ks < 1: de boom neemt minder op), `droog (let op)` (Dr > 75% van RAW), `nat` (≥ 5 mm afvoer in 3 dagen), anders `ok`.
+- Ernaast het **KNMI-stijl neerslagtekort** (vanaf 1 april, referentiegewas) als bekende maat; met FAO-56 ET0 van Open-Meteo in plaats van Makkink (kleine afwijking, zelfde betekenis).
+- **Dashboard (onderaan)**: staafgrafiek van de delta per dag (blauw = overschot, oranje = tekort) met de cumulatieve lijn over de gekozen periode (7–120 dagen), een tweede grafiek met het bodemvocht
+  (% van het beschikbare water, met de stresslijn), zes kerngetallen, een dagtabel en instellingen (grondsoort, wortelzone, ondergroei). De bodemvoorraad loopt vanaf 1 maart mee (opwarmperiode), zodat de
+  getoonde periode een betekenisvolle beginstand heeft. Weerdata 3 uur gecachet; bij een storing een foutmelding, nooit verzonnen data.
+
+**Wat is echt (gecit.) en wat illustratief** (zelfde discipline als [Deel B.1](#sec-b1)):
+| Onderdeel | Status | Bron |
+|---|---|---|
+| Vergelijkingen 58, 82, 84, 85, 88 | echt | FAO-56 hfst. 6 en 8 |
+| Kc 'stone fruit', klimaat met vorst: 0,45 / 0,90 / 0,65 (kaal), 0,50 / 1,15 / 0,90 (actieve ondergroei) | echt, maar benadering voor kers (FAO noemt abrikoos, perzik, peer, pruim, pecan; kers staat er niet apart) | FAO-56 tabel 12 |
+| Beschikbaar bodemwater per grondsoort (zand 0,05–0,11 … klei 0,12–0,20 m³/m³; midden gebruikt) | echt | FAO-56 tabel 19 |
+| Kers: p = 0,50, wortelzone 1,0–2,0 m | echt | FAO-56 tabel 22 |
+| KNMI-neerslagtekort | echt (definitie), ET0 anders dan KNMI | KNMI |
+| Kalender van de Kc-curve (1 april → 1 juni oplopend, tot 15 sept vlak, dalend tot 1 nov) | **illustratief** | eigen benadering van de FAO-stadiumlengtes |
+| Standaard grondsoort (leem), wortelzone 1,0 m, begin op veldcapaciteit op 1 maart | **illustratief** | aanname |
+| Drempels van de status (75% van RAW; 5 mm afvoer in 3 dagen) | **illustratief** | aanname |
+
+**Controle met echte data** (Open-Meteo, 1 maart – 9 oktober 2026, 223 dagen, geen ontbrekende ET0): neerslag 456 mm, gewasverdamping 706 mm (Kc 1,15 met ondergroei), delta −251 mm, afvoer 39 mm,
+KNMI-stijl neerslagtekort piekt op 287 mm (eind september 268 mm). Plausibel voor een droog seizoen (ter vergelijking: 2018 had landelijk > 300 mm). De laatste 30 dagen: delta +0,5 mm (neerslag 64 mm,
+verdamping 64 mm); op 9 oktober +15,8 mm. Tests: 14 voor de rekenkern (handberekende dag, exacte massabalans, stress, nat, ontbrekende ET0, KNMI-reset op 1 april) en 6 voor de pagina (nepbron, geen netwerk);
+331 → 351 tests.
+
+**Beperkingen / eerlijk**: (1) **Zonder grondwater-opstijging en zonder beregening is de schatting pessimistisch** — veel Nederlandse kersenpercelen krijgen water uit het grondwater; dit staat ook in de
+pagina. (2) Grondsoort en wortelzone zijn aannames; een bodemanalyse (Deel C.4/C.7) en bij voorkeur een vochtsensor maken er een echte meting van. (3) Alleen het verleden (tot gisteren, de archief-API heeft
+vandaag nog niets); een vooruitblik vraagt ET0 uit de forecast. (4) Kc voor kers is een benadering; de curve is niet gekalibreerd op dit perceel. (5) Eén emmer, geen bodemlagen of grondwaterstand.
+
+**Volgende stappen**: bodemanalyse of vochtsensor invoeren (TAW echt maken) en grondwater/opstijging modelleren; beregening uit de praktijk vastleggen (nu alleen sessie-invoer); een vooruitblik van 7 dagen
+met de forecast-ET0; de waterbalans als tool voor de adviseur ("is het te droog?") met dezelfde deterministische functie; koppeling met barstrisico rond de oogst
+([Deel B](#sec-b1), `evaluate_rain_crack_risk`) en met ziektedruk (bladnatperiode); en een kalibratie met de seizoenen uit het logboek (bv. "met de gieter rond de boompjes" 2013).
