@@ -169,6 +169,7 @@ def build_tool_catalog(ctx, snapshot: dict | None, rag_index: RagIndex | None) -
     # The teler's own logbook: LOCAL-ONLY, opt-in via ORCHARD_LOGBOOK_RAG=1 (never set on the public pod).
     from pipeline.orchard_logbook_rag import load_logbook_index, logbook_enabled
     if logbook_enabled():
+        from pipeline.orchard_logbook_calendar import calendar_facts
         logbook_index = load_logbook_index(getattr(rag_index, "embedder", None), getattr(rag_index, "query_prefix", ""))
         if logbook_index is not None:
             catalog["logboek_zoeken"] = BoundTool(
@@ -178,6 +179,15 @@ def build_tool_catalog(ctx, snapshot: dict | None, rag_index: RagIndex | None) -
                              "Citeer alleen wat er staat; de transcripties zijn nog niet allemaal geverifieerd.",
                 arg_hint="een korte zoekvraag met jaar/maand/datum en/of middel, bijv. 'Syllit 2019' of 'mei 2014'",
                 fn=lambda arg: _logboek_zoeken(arg, logbook_index),
+            )
+            catalog["logboek_kalender"] = BoundTool(
+                name="logboek_kalender",
+                description="Wat deed de teler zelf rond deze tijd van het jaar? Telt uit het eigen logboek (2013-heden) per middel in "
+                             "hoeveel jaren het in dit venster voorkwam, het gebruikelijke interval en het doel, en wat dit jaar nog "
+                             "ontbreekt. Gebruik dit voor 'wat moet ik nu/deze maand doen volgens mijn eigen historie'. Geeft nooit "
+                             "hoeveelheden of toelatingsstatus.",
+                arg_hint="optioneel: een maandnaam ('november') of datum (JJJJ-MM-DD); leeg = vandaag",
+                fn=lambda arg: ToolResult(facts=calendar_facts(arg), sources=["Eigen logboek 2013-heden (kalenderoverzicht, niet geverifieerd)"]),
             )
     if snapshot is not None:
         catalog.update({

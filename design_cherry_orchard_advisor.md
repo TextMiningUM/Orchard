@@ -100,6 +100,10 @@ Bronnen voor dit ontwerp:
   - [G.27 KG, PG, OAC, logboek-RAG, trainingsdata, antwoord-eval en analyse (2026-10-10)](#sec-g27)
   - [G.28 Meetbetrouwbaarheid, held-out set, reward, rejection sampling en SFT-rondes (2026-10-10)](#sec-g28)
   - [G.29 Waterbalans: dag-tot-dag delta neerslag minus verdamping, te droog of te nat (2026-10-10)](#sec-g29)
+  - [G.30 Logboek-kalender: "wat deed ik rond deze tijd?" en wat het logboek over de nazorg zegt (2026-10-10)](#sec-g30)
+- [Deel H — Aanbevelingen voor de teler: wat meten en vastleggen vanaf 2027](#deel-h) *(los te lezen; bedoeld om aan de teler te geven)*
+  - [H.0 Waarom dit nodig is](#sec-h0) · [H.1 Vijf spelregels](#sec-h1) · [H.2 De korte lijst (begin hier)](#sec-h2) · [H.3 Volledig overzicht per onderwerp](#sec-h3)
+  - [H.4 Camera's](#sec-h4) · [H.5 Jaarkalender 2027](#sec-h5) · [H.6 Wat de adviseur met elke meting doet](#sec-h6) · [H.7 Starterspakket](#sec-h7) · [H.8 Wat wij bouwen om dit te ontvangen](#sec-h8)
 
 ---
 
@@ -682,6 +686,7 @@ wel gebruiken, maar we moeten het eerst vertalen naar NL voor we het omzetten na
   daadwerkelijk aan opbrengst te kunnen koppelen (de kern van "maximale opbrengst" uit de opdracht).
   Dit blijft de belangrijkste blokkerende data-leemte voor een toekomstige DPO-trainingsronde die
   daadwerkelijk op opbrengst optimaliseert in plaats van op "lijkt op wat de teler deed".
+  **Wat de teler vanaf 2027 kan vastleggen om dit te dichten: zie [Deel H](#deel-h)** (oogstregistratie, bodem/blad, sensoren, vallen, camera's).
 - **Ctgb-toelatingsdata**: bulk-export-URL bleek dood (zie [C.5](#sec-c5)) — blijft een open gat,
   `check_ctgb_toelating()` is en blijft een expliciete stub.
 - **Bodem-pH/zuurgraad**: nog steeds geen echte koppeling (zie [C.4](#sec-c4)) — concreet gemist bij
@@ -2255,3 +2260,175 @@ pagina. (2) Grondsoort en wortelzone zijn aannames; een bodemanalyse (Deel C.4/C
 - **Kalibratie op het logboek: niet haalbaar.** Het logboek (484 opmerkingen) bevat geen beregening en geen opbrengst- of droogte-uitkomst; "droog" komt 8× voor, "gieter" 1× (2013) en er is geen vochtmeting.
   Kalibreren van Kc, wortelzone of drempels vraagt een uitkomst (vochtsensor, stressscore, opbrengst) per seizoen; die kan de teler gaan vastleggen. Tot dan blijft de status een FAO-56-indicatie.
 - Tests: 362 groen (nieuw: service met continuering/dubbele dagen/forecast-storing/uitblik, tool, pagina met forecast en storing).
+
+---
+
+<a id="sec-g30"></a>
+## G.30 Logboek-kalender: "wat deed ik rond deze tijd?" en wat het logboek over de nazorg zegt (2026-10-10)
+
+**Vraag (teler)**: welke inzichten kunnen we nog uit de logboeken halen, hoe gebruiken we ze bij de oogst van 2027, en wat is er nu te doen in de nazorg/rust — een advies per periode, week of maand op basis van de logboeken?
+
+**Gebouwd** (alles deterministisch geteld, het taalmodel rekent of verzint niets):
+- `pipeline/orchard_logbook_calendar.py`: per referentiedatum en venster (±7–30 dagen) per middel *in hoeveel jaren van het eigen logboek het voorkwam*, aantal toepassingen, gebruikelijk interval (mediaan) en doel uit de opmerkingen ("Tegen pseudomonas"; weerzinnen
+  als "beetje wind" tellen niet als doel). Daarnaast de vergelijking met dit jaar: "gebruikelijk rond deze tijd (in ≥ 50% van de jaren), maar dit jaar nog niet in het logboek" — alleen als het lopende jaar genoeg regels heeft
+  (anders staat er eerlijk dat vergelijken niet kan; 2026 heeft nog 0 regels). Namen via de bestaande `orchard_middelen.canonicalize_middel` (Zinc = Zink e.d.).
+- **Adviseur-tool `logboek_kalender`** (alleen met `ORCHARD_LOGBOOK_RAG=1` en de database aanwezig, dus net als `logboek_zoeken` niet op de publieke pod): argument leeg = vandaag, een maandnaam ("november") of een datum. Bron wordt vermeld.
+- **Pagina-sectie** "Wat deed ik rond deze tijd?" bovenaan *Gebruik van Middelen* (`app/logbook_calendar_view.py`): datum + venster, tabel per middel, waarschuwing voor wat dit jaar ontbreekt.
+- **Compliance-guardrail** ([B.11](#sec-b11)): hoeveelheden staan bewust **nergens** in de uitvoer (de tool kan dus geen dosering "uit eigen gewoonte" suggereren), en elke uitvoer sluit af met: eigen historie, geen advies, geen toelatingsstatus, controleer Ctgb/kennisbank.
+
+**Twee datakwaliteitsbevindingen die de tellingen vertekenden** (nu gecorrigeerd bij het lezen, de database zelf blijft ongemoeid):
+1. **2020 is twee keer ingescand** (`jaar 2020.pdf` en `jaar 2020-2.pdf`): 45 identieke regels (zelfde datum, middelen en hoeveelheden) stonden dubbel, daarom had 2020 90 regels tegen ~40 in andere jaren. `dedupe_entries` telt identieke regels van
+   *verschillende pagina's* één keer (42 verwijderd; een dezelfde regel twee keer op één pagina blijft staan, dat kan echt twee bespuitingen op één dag zijn). *Gebruik van Middelen* gebruikt dit nu ook, dus de eerdere totalen in [G.9](#sec-g9) waren voor 2020 te hoog.
+2. **Geen enkele van de 487 regels is handmatig geverifieerd** (en 2024 heeft maar één regel). Een jaar met < 8 regels telt niet mee als "jaar met logboek" (anders lijkt elk middel in 2024 "niet gedaan"). De verificatie-pagina blijft de belangrijkste openstaande kwaliteitsstap.
+
+**Wat het logboek zegt over nu (oktober tot december; eigen historie 2013–2025)**:
+- *Oktober*: bladvoeding (Ureum met Borium, Mangaan, Kalifosfaat, Epso Microtop), meestal 1–4 rondes met 4–14 dagen ertussen; Ureum komt in 8 jaar voor.
+- *Eind oktober tot half november*: **koper + zink (soms ureum) tegen pseudomonas rond de bladval**: koper in 8 van de 12 jaren in het venster rond half november, vaak 2–4 rondes met ~1 week ertussen; in 2019 expliciet "zink voor bladvertering".
+  In 2025 hetzelfde patroon (koper 15 okt en 1 nov, zink 20 okt en 4 nov, bitterzout 20 okt, 1 en 7 nov).
+- *December*: hooguit één of twee koperrondes (2017, 2021); daarna niets tot maart (dan koper, borium, zwavel, patentkali, kalk).
+- Dit zegt **wat de teler deed, niet of het werkte**: het logboek bevat geen uitkomsten. Daarom is Deel H nodig.
+
+**Wat we er nog meer mee kunnen** (volgende stappen, nog niet gebouwd): (a) ingrepen op **fenologie/graaddagen** zetten in plaats van kalenderdatum (koud en warm jaar eerlijk vergelijken); (b) **koperbelasting per jaar** optellen en toetsen aan de wettelijke grens
+(de grenswaarde eerst uit de kennisbank halen, hier staat bewust geen getal); (c) **spuitmoment tegenover weer**: hoe vaak viel er regen of veel wind vlak na een bespuiting (het weer staat al per regel in het logboek); (d) naamvarianten die we nu niet met zekerheid
+samenvoegen (Tracor/Tracer) door de teler laten bevestigen; (e) de kalender combineren met de actuele fenofase, het weer en de waterbalans tot één "deze week"-overzicht, met dezelfde guardrails.
+
+Tests: 377 groen (nieuw: 15 voor de kalender, dubbele regels, jaar-met-logboek, Feb-29, tool met/zonder vlag, database, pagina).
+
+---
+
+<a id="deel-h"></a>
+# Deel H — Aanbevelingen voor de teler: wat meten en vastleggen vanaf 2027
+
+*Dit deel is zo geschreven dat het los te lezen is en aan de teler gegeven kan worden. Alles in "Moeite/kosten" is een relatieve schaal (laag/midden/hoog) en geen prijsopgave; vraag voor sensoren en camera's altijd offertes en advies van een leverancier of adviseur.
+Agronomische richtwaarden zijn indicatief en komen uit VS-extensiebronnen (OSU, WSU, Cornell) en de Nederlandse praktijk; laat streefwaarden per grondsoort en ras door je lab of adviseur bevestigen.*
+
+<a id="sec-h0"></a>
+## H.0 Waarom dit nodig is
+
+Het logboek van 2013–2025 vertelt **wat** er gebeurde (middel, datum, weer), maar niet **wat eruit kwam**. Daardoor kan de adviseur zeggen "dit deed je meestal in november", maar niet "dit werkte" of "dat heeft de opbrengst gekost". Voor een adviseur die echt aan
+opbrengst en kwaliteit werkt, ontbreken vier dingen: **uitkomsten** (kilo's, klasse, barst, schade), **metingen van de omstandigheden** (bodem, bodemvocht, weer op het perceel), **waarnemingen in het seizoen** (bloei, plagen, schade, met foto) en
+**een vaste structuur** (per boom/rij/ras, op een vast moment). Dit deel zegt wat je daarvoor kunt vastleggen, in volgorde van belang, zodat je klein kunt beginnen en kunt uitbreiden.
+
+**Wat je ervoor terugkrijgt**: een adviseur die kan zeggen "vorig jaar spoot je op 6 mei en kreeg je 4% barst; dit jaar valt de bloei 9 dagen eerder, de bodem is droger dan toen, en de vliegenval staat al op 5" — met jouw eigen cijfers in plaats van gemiddelden uit boeken.
+
+<a id="sec-h1"></a>
+## H.1 Vijf spelregels (belangrijker dan welke sensor je koopt)
+
+1. **Altijd datum + plaats**: elke meting krijgt een datum, een perceel/blok, bij voorkeur een rij- of boomnummer (hang nummerplaatjes; het ras en de onderstam staan vast per nummer).
+2. **Elk jaar op hetzelfde moment en dezelfde plek**: bodem- en bladmonster, foto's, vaste telbomen. Alleen dan zijn jaren vergelijkbaar.
+3. **Ook "niets gezien" en "niets gedaan" noteren**: nul plagen op een val is informatie; een lege regel is dat niet.
+4. **Eén eenheid per grootheid** (kg per boom of per rij, liter per ha, mm water). Schrijf de eenheid erbij.
+5. **Uitkomst noteren, ook als het tegenvalt**: dit is precies wat in de huidige logboeken ontbreekt.
+
+<a id="sec-h2"></a>
+## H.2 De korte lijst: wat het meeste oplevert (begin hier)
+
+| # | Wat | Hoe vaak | Waarom (wat de adviseur ermee doet) | Moeite/kosten |
+|---|---|---|---|---|
+| 1 | **Oogstregistratie per ras en perceel**: datum, kilo's (per kist wegen), klasse/maat in mm, % barst, % made/Suzuki, % hagel/vogel | elke pluk | Het ontbrekende "resultaat". Zonder dit is optimaliseren op opbrengst niet mogelijk ([C.7](#sec-c7)); het is ook het signaal voor latere training | laag |
+| 2 | **Bodemanalyse** (pH, organische stof, nutriënten, kalk/EC; vermeld de methode, bv. pH-KCl of pH-CaCl2) | 1× per jaar, zelfde tijd (najaar of vroeg voorjaar) | pH richtwaarde voor kers ca. **6,0–7,0**; buiten die band worden o.a. ijzer en zink slecht opneembaar. Maakt ook de waterbalans ([G.29](#sec-g29)) echt (nu is de grondsoort een aanname) | laag |
+| 3 | **Bladanalyse** | 1× per jaar in **juli**, zelfde bomen | Toont of de bemesting en bladvoeding (ureum, borium, zink, mangaan, magnesium) echt aankomen; stuurt de bemesting van het volgende jaar. Past bij de vele bladvoedingsrondes in het logboek | laag |
+| 4 | **Bodemvochtsensoren** (2 dieptes, in de boomstrook, op een representatieve plek) + **regenmeter op het perceel** + **watermeter bij beregening** | continu (log elk uur) | Kalibreert de waterbalans (TAW, wortelzone, drempel voor stress) en zegt of beregenen nodig was | midden |
+| 5 | **Weerstation/loggers op het perceel**: temperatuur op boomhoogte (vooral min.-temperatuur in de bloei), neerslag, wind, bladnatduur | continu | Echte vorst in jouw perceel (kouplekken), echte bladnat-uren voor ziektemodellen, en controle op de weer-API | midden |
+| 6 | **Fenologie-waarnemingen** (BBCH of simpel: knopzwelling, begin / volle / einde bloei, vruchtzetting, kleuren, oogstbegin) per ras | wekelijks in het seizoen | Kalibreert de koude-uren-/graaddagen-modellen en voorspelt bloei en oogst voor jouw rassen | laag |
+| 7 | **Plaagmonitoring met vallen**: Suzuki-vallen (rood/donker + lokmiddel), gele plakplaten voor de kersenvlieg; telling met datum | wekelijks, **vanaf vóór de vruchten kleuren tot de oogst** (kersenvlieg: vóór het verwachte begin van de vlucht) | Maakt de Suzuki-/kersenvlieg-risicomodellen meetbaar en bepaalt het spuitmoment | laag |
+| 8 | **Digitale spuit- en bemestingsregistratie** (zie H.3 G) | bij elke behandeling | Eén structuur voor alle jaren; verplicht om bij te houden (EU 1107/2009, art. 67: gegevens minimaal 3 jaar bewaren, controleer de actuele eis) | laag |
+| 9 | **Schadefoto's en -scores** bij vorst, hagel, regen/barst, vogels | bij elk incident, + 1–2 dagen later | Maakt "wat was de schade" koppelbaar aan weer en handelen | laag |
+| 10 | **Camera's** (zie H.4) op 1–2 vaste plekken | dagelijks | Automatische fenologie, groei, kleuring en schadetijdlijn; later schatting van bloem- en vruchtaantal | midden |
+
+<a id="sec-h3"></a>
+## H.3 Volledig overzicht per onderwerp
+
+**A. Bodem**
+| Meting | Moment | Opmerking |
+|---|---|---|
+| pH (+ methode), organische stof, kalktoestand, EC/zoutgehalte | 1× per jaar, zelfde moment | mengmonster van meerdere steken per perceel of grondsoort (VS-adviezen: 10–20 steken per blok, bovenste ~30 cm; vraag je lab om het protocol); niet vlak na bemesting of beregening |
+| Nutriënten (P, K, Mg, Ca, S) en sporenelementen (B, Zn, Mn, Fe, Cu) | 1× per jaar | borium, zink en mangaan staan elk jaar in het logboek: hiermee zie je of het nodig is |
+| Stikstof-mineraal (N-min) | voorjaar | voor de stikstofgift (ureum is de meest gebruikte meststof in het logboek) |
+| Grondsoort en profiel (zand/leem/klei, laagopbouw, verdichting, doorwortelbare diepte) | eenmalig (profielkuil of boor), daarna om de paar jaar | bepaalt TAW en wortelzone in de waterbalans |
+| Grondwaterstand / drainage | eenmalig + bij nat of droog seizoen | grondwater-opstijging is de grote onbekende in de waterbalans |
+| Eventueel: bodemleven, regenwormen, grondbedekking (gras/kaal), onkruidstrook-breedte | jaarlijks, korte notitie | grondbedekking verandert de verdamping (Kc) |
+
+**B. Water en beregening**: bodemvocht op 2 dieptes (capacitieve sensoren of tensiometers), regenmeter, watermeter, beregeningsduur en mm per beurt, en of het uit grondwater of sloot komt. Ook droogtestress zien en noteren (bladrollen, schorsscheuren), met foto.
+
+**C. Weer op het perceel**: luchttemperatuur op boomhoogte (en in de laagste hoek van het perceel voor vorst), neerslag, windsnelheid/-richting, instraling of zonuren, bladnat; elk uur loggen. In de bloei elke 10–15 minuten voor vorst. Dit valideert ook de koude-uren (rustperiode) en de graaddagen.
+
+**D. Fenologie en groei**: data van knopzwelling, begin/volle/einde bloei, vruchtzetting (% bloemen die een vrucht worden: tel op vaste takken), kleuren, oogstbegin en -einde, bladval. Groeikracht: scheutlengte aan vaste bomen en stamomtrek (stamdoorsnede) jaarlijks. Snoeidatum en wat er gesnoeid is.
+
+**E. Plaag en ziekte (scouting)**: score 0–3 per vaste telboom, wekelijks: luis (zwarte kersenluis), spint, monilia, schimmelziekten van blad en vrucht, **bacterie/pseudomonas (kanker, gomvloed, afsterven)**, "hagelschot" (Stigmina), vogelschade. Vallen: Suzuki-valtelling (mannetjes met vlek op de vleugel), gele plakplaten kersenvlieg. Noteer ook de plek.
+
+**F. Bestuiving**: aantal bijen-/hommelvolken en wiens kasten, plaatsingsdatum, bijenvlucht bij bepaalde temperatuur, overlap met de bloei; vruchtzetting als uitkomst ([C.7](#sec-c7)).
+
+**G. Spuit- en bemestingsregistratie (per behandeling)**: datum + begin/eindtijd; perceel/rijen; middel en toelatingsnummer; dosis **per ha** en spuitvolume; doel (plaag/ziekte); fenologisch stadium; **windsnelheid en -richting, temperatuur, regen binnen 24 uur (ja/nee)**; spuitdoppen/driftreductie; wachttijd/veiligheidstermijn; partijnummer; *en achteraf: werkte het (0–3)*. Bij meststoffen: N-P-K/spoor per ha en of het bladvoeding of strooien was. (Hoeveelheden komen nooit als advies uit de adviseur; ze zijn wel nodig om je eigen koperbelasting en middelengebruik per jaar te kunnen tellen.)
+
+**H. Oogst en kwaliteit (per pluk)**: datum, ras, perceel/rij, kilo's, aantal kisten, klasse en maat (mm), vaste stof (°Brix), stevigheid, kleur, % barst, % made/Suzuki, % hagelschade/vogelschade/dubbele vruchten, uitval; arbeidsuren en prijs/afzet per klasse. Dit is de basis om te rekenen welke ingreep zich terugbetaalt.
+
+**I. Economie**: kosten per ingreep (middel, arbeid, machine), opbrengst per klasse, prijs. Dan kan de adviseur straks zeggen wat een ingreep per hectare opleverde.
+
+**J. Boom- en perceelgegevens (eenmalig, dan bijhouden)**: ras, onderstam, plantjaar, plantafstand, rij-/boomnummers, kaartje, overkapping/regenkappen ja/nee, windscherm, hellingen en kouplekken, aanvullende bomen (bestuivers).
+
+<a id="sec-h4"></a>
+## H.4 Camera's: wat ze opleveren, hoe je ze plaatst
+
+**Wat het oplevert (in volgorde van haalbaarheid)**
+1. **Een tijdlijn per boom/rij**: bloeibegin, volle bloei, vruchtzetting, kleuren, schade (vorst, hagel, vogels, barst na regen) met datum. Dit is waardevol zelfs zonder analyse, omdat je terug kunt kijken en uitkomsten kunt koppelen aan weer en handelingen.
+2. **Fenologie automatisch scoren** uit de foto's (bloeistadium, vruchtkleur). Haalbaar met bestaande beeldherkenning, maar de nauwkeurigheid moet in jouw boomgaard gevalideerd worden tegen je eigen waarnemingen.
+3. **Bloemen en vruchten tellen en opbrengst schatten** (computer vision). Dit wordt in onderzoek en door leveranciers toegepast voor appel en kers, maar de nauwkeurigheid hangt af van boomvorm, afstand en licht; hier eerst verzamelen en pas na 1–2 seizoenen beoordelen of het betrouwbaar genoeg is.
+
+**Opstelling (aanbevolen)**
+- **1–2 cameraposities per ras/blok**, vast gemonteerd op een paal of boompaal: één *overzichtsbeeld* van een hele boom of een stuk rij en één *close-up* van een vaste tak met bloemen/vruchten.
+- **Elke dag op vaste tijd** (bijvoorbeeld rond 12:00 voor gelijkmatig licht), tijdens bloei en kleuring 2–3× per dag. Vaste hoek en afstand; verplaats de camera nooit midden in het seizoen.
+- **Referentie in beeld**: een grijs/kleurenkaartje en een lat of markering voor schaal, zodat kleur en grootte vergelijkbaar blijven.
+- **Tijdstempel en cameranummer in de bestandsnaam** (bv. `rij12_overzicht_2027-04-18_1200.jpg`). Resolutie minimaal ca. 12 MP voor vruchten van dichtbij; weerbestendig, op zonnepaneel met 4G of wifi. Een gewone wildlife-/trailcamera werkt voor het begin vaak al.
+- **Foto's blijven lokaal opgeslagen** (zoals de logboeken: eigen bedrijfsdata, niet openbaar). Maak een kopie op een tweede schijf.
+- **Handmatige waarheid ernaast**: schrijf wekelijks de BBCH-stadia en bij oogst de kilo's op. Zonder die waarheid kan een beeldmodel niet leren of controleren.
+- Drone of satelliet (NDVI/groeikracht per rij) kan later aanvullen maar is voor een eerste jaar niet nodig.
+
+**Eerlijk over de verwachting**: het verzamelen van de foto's is in 2027 het doel. Een geautomatiseerde analyse vraagt eigen ontwikkeling of een leverancier en bewijst zich pas met data uit minstens één seizoen waarvan je de uitkomst kent.
+
+<a id="sec-h5"></a>
+## H.5 Wat wanneer: jaarkalender 2027
+
+| Periode | Meten en vastleggen |
+|---|---|
+| **Nov–feb (rust)** | Bodemanalyse (als het niet in het najaar kon); sensoren, loggers en camerapalen plaatsen en testen; rij-/boomnummering; je logboek 2025 verifiëren; koude-uren worden automatisch berekend (loggers valideren de weer-API); schade en bladval-notities; snoeiplan |
+| **Maart–knopzwelling** | Camera's aan; eerste fenologie-notities; bodemvocht-sensoren aan; kalk/borium/zwavel-ingrepen digitaal noteren; vallen voor vroege plagen klaarzetten |
+| **Bloei (eind maart–april)** | Minimum-temperatuur elke 10–15 min loggen; na elke koude nacht % beschadigde bloemen tellen en foto; bestuiving: aantal volken, plaatsingsdatum, vlucht bij welke temperatuur; BBCH wekelijks |
+| **Vruchtzetting (april–mei)** | Vruchtzetting % op vaste takken; scouting luis/spint/bladziekten wekelijks; hagelschade-foto; kersenvlieg-platen ophangen; bespuitingen + weer + effect |
+| **Groei en rijping (mei–juni/juli)** | **Suzuki-vallen vóór het kleuren, wekelijks tellen**; bodemvocht en beregening bijhouden; foto's 2–3× per dag tijdens kleuring; regen vlak voor oogst: barst-percentage na elke bui; **juli: bladmonster** |
+| **Oogst** | Per pluk: kg, klasse, maat, Brix, stevigheid, % barst/made/schade, uren; afzetprijs; foto's van schade |
+| **Aug–sep (nazorg)** | Bladvoeding en bemesting digitaal noteren; evaluatie van het seizoen (wat ging goed/slecht; vaste vragen); sensor- en foto-data veiligstellen |
+| **Okt–nov (bladval)** | Bodemmonster (zelfde tijdstip elk jaar); bladvalnotitie (begin/50%/einde); koper-/zinkrondes met weer en bladstadium vastleggen |
+
+<a id="sec-h6"></a>
+## H.6 Wat de adviseur met elke meting doet
+
+| Meting | Gebruikt door | Effect |
+|---|---|---|
+| Bodemvocht, regenmeter, beregening | waterbalans ([G.29](#sec-g29)) | Kalibreert TAW, wortelzone en stressdrempel; "te droog/te nat" wordt een meting in plaats van een schatting |
+| Bodemanalyse, bladanalyse | bemestingsadvies, Patroonherkenning ([G.8](#sec-g8)) | Bodem-pH-waarschuwing (nu een placeholder), bemesting op werkelijke tekorten |
+| Weer op het perceel, bladnat | vorstrisico, ziektemodellen, koude-uren | Echte perceelwaarden in plaats van API-waarden voor een stationsplek |
+| Fenologie + camera | koude-uren/graaddagen-model, oogstvoorspelling | Voorspelt bloei en oogst per ras, kalibreert de modellen ([B.1](#sec-b1)) |
+| Vallen, scouting | Suzuki-/kersenvlieg-risico | Spuitmoment op basis van waargenomen druk |
+| Spuitregistratie + effect | logboek-kalender ([G.30](#sec-g30)), reward-functie ([G.28](#sec-g28)) | "Wat werkte" is voor het eerst te zien; echte beloningssignalen voor DPO |
+| Oogst + kwaliteit + economie | evaluatie en training | De kern van "maximale opbrengst": koppeling ingreep → uitkomst; basis voor SFT/DPO die echt op opbrengst optimaliseert ([C.7](#sec-c7)) |
+
+<a id="sec-h7"></a>
+## H.7 Starterspakket (als je klein wilt beginnen)
+
+1. **Oogst per pluk wegen en noteren** (H.2 #1) en na elke bui het barstpercentage schatten.
+2. **Eén bodem- en één bladanalyse** (H.2 #2–3).
+3. **Regenmeter en 2 bodemvochtsensoren** + een **minimum-temperatuurlogger** voor de bloei.
+4. **Suzuki-vallen en gele platen** wekelijks tellen.
+5. **Wekelijkse fenologie-notitie** (BBCH of simpel) en **1 camera** op een vaste plek.
+6. **Elke behandeling** met de velden uit H.3 G noteren (ook *werkte het?* 0–3).
+7. **Seizoensevaluatie** in november: vijf vaste vragen (wat ging goed, wat ging mis, wat kostte het, wat doe ik volgend jaar anders, wat miste ik aan gegevens).
+
+<a id="sec-h8"></a>
+## H.8 Wat wij bouwen om dit te ontvangen (nog niet gebouwd)
+
+- **Invoerpagina's** in de app (lokaal): oogstregistratie, scouting/valtelling, schadescore, spuit- en bemestingsregistratie met "werkte het?", seizoensevaluatie; elk met datum + perceel/rij, validatie van eenheden en een export naar CSV.
+- **Import van sensor- en loggerbestanden** (CSV) met controle op gaten en onmogelijke waarden, en weergave naast de waterbalans en het vorstrisico.
+- **Foto-opslag lokaal** met een eenvoudig overzicht per camera en dag, en een invoerveld voor de handmatige BBCH-waarheid.
+- **Kalibratie** zodra er een seizoen met uitkomsten is: Kc, wortelzone en drempels van de waterbalans, graaddagen voor bloei en oogst, en het Suzuki-/barstrisico, elk met een eerlijke vergelijking van voor en na.
+- Pas daarna zinvolle **DPO/SFT op uitkomsten** (zie [G.28](#sec-g28)): zonder echte uitkomsten blijft de beloning een proxy.

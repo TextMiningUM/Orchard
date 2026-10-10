@@ -29,7 +29,8 @@ from pipeline.orchard_middelen import (  # noqa: E402
     aggregate_middelen,
     build_toepassing_records,
 )
-from pipeline.orchard_patterns import LogEntry, load_entries  # noqa: E402
+from pipeline.orchard_logbook_calendar import load_calendar_data  # noqa: E402
+from logbook_calendar_view import render_logbook_calendar  # noqa: E402
 
 st.set_page_config(page_title="Gebruik van Middelen", layout="wide")
 st.title("Gebruik van Middelen")
@@ -53,18 +54,9 @@ if not DB_PATH.exists():
 
 
 @st.cache_data(show_spinner=False)
-def _cached_load_entries(db_path: str, mtime: float) -> list[LogEntry]:
-    conn = sqlite3.connect(db_path)
-    try:
-        return load_entries(conn)
-    finally:
-        conn.close()
-
-
-@st.cache_data(show_spinner=False)
 def _cached_records(db_path: str, mtime: float) -> list[ToepassingRecord]:
-    entries = _cached_load_entries(db_path, mtime)
-    return build_toepassing_records(entries)
+    # dubbel ingescande regels (2020 staat in twee scans) tellen één keer, anders lijkt het gebruik verdubbeld
+    return build_toepassing_records(load_calendar_data(Path(db_path)).entries)
 
 
 def _fetch_entry_rows(entry_ids: list[int]) -> pd.DataFrame:
@@ -103,6 +95,9 @@ records = _cached_records(str(DB_PATH), DB_PATH.stat().st_mtime)
 entry_ids_by_middel: dict[str, list[int]] = {}
 for r in records:
     entry_ids_by_middel.setdefault(r.canonical_middel, []).append(r.entry_id)
+
+render_logbook_calendar(DB_PATH)
+st.divider()
 
 col_a, col_b = st.columns([1, 3])
 granulariteit = col_a.selectbox(
